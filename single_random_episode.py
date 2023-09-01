@@ -42,10 +42,10 @@ class L_Hallway_Single_robot(Gazebo):
         return self.robot1.trajectory
 
 if __name__ == "__main__":
-    name, init_pose = np.random.choice([["marvin", Pose(-10,0,0)], ["rob", Pose(0, -10, np.pi/2)]])
+    name, init_pose = np.random.choice([["marvin", Pose(-10,0,0)], ["rob", Pose(0, -10, np.pi/2.)]])
     env = L_Hallway_Single_robot(ep_timeout=30.0)
     env.register_robots(robot1=Vanilla( name ))
 
-    trajectory = env.begin()
+    trajectory = env.begin(init_pose, Pose(0, 0, np.pi/4.))
 
     print(trajectory)
