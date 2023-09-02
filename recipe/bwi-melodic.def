@@ -1,0 +1,54 @@
+BootStrap: docker
+From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
+
+%labels
+
+%help
+
+%files
+c
+%post
+    export ROS_DISTRO=melodic
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update && apt-get install -y apt-utils curl nano vim tmux python-pip
+    echo 'deb http://packages.ros.org/ros/ubuntu bionic main' > /etc/apt/sources.list.d/ros-latest.list
+    curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add -
+
+    apt-get update
+    apt-get install -y ros-${ROS_DISTRO}-desktop-full python-rosdep python-rosinstall python-rosinstall-generator \
+                       python-wstool build-essential python-catkin-tools libqt5websockets5-dev qt5-default
+    pip install -U pyYAML
+    rosdep init
+
+    ####################################
+    # Install bwi repositories (light) #
+    ####################################
+    # dependencies
+    apt-get install -y ros-melodic-actionlib-tutorials ros-melodic-cv-bridge ros-melodic-map-server ros-melodic-gazebo-ros \
+                       ros-melodic-gazebo-msgs ros-melodic-gazebo-ros-control ros-melodic-gazebo-plugins ros-melodic-pcl-ros \
+                       ros-melodic-robot-state-publisher ros-melodic-joint-state-publisher ros-melodic-joint-trajectory-controller \
+                       ros-melodic-dynamic-reconfigure ros-melodic-message-filters ros-melodic-map-msgs ros-melodic-xacro \
+                       ros-melodic-laser-filters ros-melodic-nodelet ros-melodic-pluginlib ros-melodic-roslint ros-melodic-move-base \
+                       ros-melodic-move-base-msgs ros-melodic-amcl ros-melodic-nav-msgs ros-melodic-depthimage-to-laserscan \
+                       ros-melodic-pointcloud-to-laserscan ros-melodic-pr2-description ros-melodic-dwa-local-planner \
+                       ros-melodic-eband-local-planner ros-melodic-global-planner ros-melodic-rviz ros-melodic-octomap
+    # Download BWI repo
+    mkdir -p /bwi_ws/src && cd /bwi_ws/src
+    git clone -b jinsoo/light-hal-sim https://github.com/utexas-bwi/bwi.git
+    git clone -b jinsoo/light-hal-sim https://github.com/utexas-bwi/bwi_common.git
+    git clone -b jinsoo/light-hal-sim https://github.com/utexas-bwi/segbot.git
+    git clone -b main https://github.com/utexas-bwi/segbot_bringup.git
+    git clone -b master https://github.com/marinaKollmitz/gazebo_ros_2Dmap_plugin
+
+    # Compile BWI repo
+    cd /bwi_ws
+    catkin config --init
+    bash -c "source /opt/ros/melodic/setup.bash; catkin build -j6"  # Use -j2 if machine is slow
+
+%runscript
+
+%environment
+    # ros
+    export ROS_HOSTNAME=localhost
+    export ROS_MASTER_URI=http://localhost:11311
