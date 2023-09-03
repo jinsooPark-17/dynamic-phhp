@@ -1,6 +1,7 @@
 #/usr/bin/env python3.8
 from collections import namedtuple
-from envs.robots import Vanilla, Gazebo
+from envs.robots import Vanilla
+from envs.simulation import Gazebo
 import numpy as np
 import rospy
 
@@ -24,7 +25,7 @@ class L_Hallway_Single_robot(Gazebo):
         self.teleport(self.robot1.id, init_poses[0].x, init_poses[0].y, init_poses[0].yaw)
         rospy.sleep(1.0)
         ## localize robots
-        self.robot1.localize(init_poses[0].x, init_poses[0].y, init_pose[0].yaw)
+        self.robot1.localize(init_poses[0].x, init_poses[0].y, init_poses[0].yaw)
         rospy.sleep(1.0)
         for _ in range(10):
             self.robot1.clear_costmap()
@@ -42,10 +43,11 @@ class L_Hallway_Single_robot(Gazebo):
         return self.robot1.trajectory
 
 if __name__ == "__main__":
-    name, init_pose = np.random.choice([["marvin", Pose(-10,0,0)], ["rob", Pose(0, -10, np.pi/2.)]])
+    idx = np.random.choice(2)
+    name, init_pose = [["marvin", Pose(-10,0,0)], ["rob", Pose(0, -10, np.pi/2.)]][idx]
     env = L_Hallway_Single_robot(ep_timeout=30.0)
     env.register_robots(robot1=Vanilla( name ))
 
-    trajectory = env.begin(init_pose, Pose(0, 0, np.pi/4.))
+    trajectory = env.begin([init_pose], [Pose(0, 0, np.pi/4.)])
 
     print(trajectory)
