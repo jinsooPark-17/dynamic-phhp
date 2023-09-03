@@ -29,6 +29,41 @@ class Gazebo:
         except (rospy.ServiceException) as e:
             raise RuntimeError("Gazebo: set_model_state does not respond.")
 
+class L_Hallway_Single_robot(Gazebo):
+    def __init__(self, ep_timeout: float=60.0):
+        super().__init__()
+        self.robot1 = None
+        self.timeout = ep_timeout
+        self.rate = rospy.Rate(10)
+
+    def register_robots(self, robot1):
+        self.robot1 = robot1
+
+    def begin(self, init_poses, goal_poses):
+        # Reset episode
+        ## stop robot
+        self.robot1.stop()
+        ## teleport robots
+        self.teleport(self.robot1.id, init_poses[0].x, init_poses[0].y, init_poses[0].yaw)
+        rospy.sleep(1.0)
+        ## localize robots
+        self.robot1.localize(init_poses[0].x, init_poses[0].y, init_poses[0].yaw)
+        rospy.sleep(1.0)
+        for _ in range(10):
+            self.robot1.clear_costmap()
+            rospy.sleep(0.1)
+
+        # Move robots to goal pose
+        self.robot1.goto(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, timeout=self.timeout)
+
+        # wait for episode to finish
+        while not rospy.is_shutdown():
+            if self.robot1.is_arrived():
+                break
+            self.rate.sleep()
+
+        return self.robot1.ttd # self.robot1.trajectory
+
 class I_Hallway(Gazebo):
     def __init__(self, robot1=None, robot2=None, ep_timeout: float=60.0, hz: float=1.0):
         super().__init__()
