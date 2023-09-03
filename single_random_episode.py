@@ -1,4 +1,4 @@
-#/usr/bin/env python3.8
+#!/usr/bin/env python3
 from collections import namedtuple
 from envs.robots import Vanilla, Gazebo
 import numpy as np
