@@ -47,8 +47,8 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     bash -c "source /opt/ros/melodic/setup.bash; catkin build -j6"  # Use -j2 if machine is slow
 
     # Install Dynamic-PHHP dependencies (Python3)
-    apt-get install -y python3-pip
-    pip3 install torch numpy pyYAML rospkg netifaces mpi4py
+    apt-get install -y python3-pip coreutils
+    pip3 install torch numpy pyYAML rospkg netifaces mpi4py matplotlib
 
 %environment
     # fix locale::facet::_5_create_c_locale name not valid error

@@ -33,10 +33,13 @@ if __name__ == "__main__":
     
     # Now, run episode
     ttd = env.begin([init_pose], [Pose(0., 0., np.pi/4.)])
-
-    print(f"Simulator {rank+1}: Finished with {ttd:.2f} s")
-    comm.Barrier()
+    if type(ttd) is float:
+        print(f"[{gethostname()}-{rank:02d}] Episode TTD: {ttd:.2f} s")
+    else:
+        print(f"Simulator {rank+1} failed.")
 
     avg_ep_ttd = comm.reduce(ttd, op=MPI.SUM, root=0)
+
     if rank == 0:
-        print(f"Average TTD of single episode: {avg_ep_ttd}")
+        avg_ep_ttd = avg_ep_ttd / float(n_valid)
+        print(f"\nAverage TTD of single episode: {avg_ep_ttd:.3f} seconds")
