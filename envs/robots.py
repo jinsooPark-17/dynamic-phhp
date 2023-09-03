@@ -22,8 +22,8 @@ class MoveBase(object):
         # define ROS move_base
         self.move_base = SimpleActionClient( os.path.join(self.id, "move_base"), MoveBaseAction )
         connected = self.move_base.wait_for_server(timeout=rospy.Duration(30.0))
-        if not connected:
-            raise TimeoutError("MoveBase not respond")
+        # if not connected:
+            # raise TimeoutError("MoveBase not respond")
         # define clear costmap service
         self.__clear_costmap_srv = rospy.ServiceProxy(os.path.join(self.id, "move_base", "clear_costmaps"), Empty)
 
