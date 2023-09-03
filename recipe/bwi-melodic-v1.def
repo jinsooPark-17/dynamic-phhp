@@ -4,7 +4,10 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 %labels
 
 %help
-    MPI does not work.
+    c303-005.ls6(1007)$ ibrun singularity run containers/bwi-melodic-v1.simg osu_bcast
+    TACC:  Starting up job 1098372
+    TACC:  Starting parallel tasks...
+    TACC:  Shutdown complete. Exiting.
 %files
 
 %post

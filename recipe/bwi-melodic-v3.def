@@ -4,7 +4,38 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 %labels
 
 %help
-    Test if set environment variable is working.
+    c303-005.ls6(1005)$ ibrun singularity run containers/bwi-melodic-v3.simg osu_bcast
+    TACC:  Starting up job 1098372
+    TACC:  Starting parallel tasks...
+
+    # OSU MPI Broadcast Latency Test v5.6
+    # Size       Avg Latency(us)
+    Warning: Process to core binding is enabled and OMP_NUM_THREADS is set to non-zero (1) value
+    If your program has OpenMP sections, this can cause over-subscription of cores and consequently poor performance
+    To avoid this, please re-run your application after setting MV2_ENABLE_AFFINITY=0
+    Use MV2_USE_THREAD_WARNING=0 to suppress this message
+    1                      29.06
+    2                      10.30
+    4                      10.20
+    8                       9.81
+    16                     10.18
+    32                      9.90
+    64                     10.05
+    128                     9.62
+    256                     9.33
+    512                    10.74
+    1024                   11.61
+    2048                   14.23
+    4096                   20.16
+    8192                   21.46
+    16384                  31.07
+    32768                  51.04
+    65536                  89.78
+    131072                184.70
+    262144                379.12
+    524288                986.28
+    1048576               816.39
+    TACC:  Shutdown complete. Exiting.
 %files
 
 %post
