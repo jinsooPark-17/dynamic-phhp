@@ -1,11 +1,6 @@
 #!/bin/bash
 source /bwi_ws/devel/setup.bash
-roslaunch bwi_launch two_robot_simulation.launch & 1> /dev/null
-SIMULATOR_PROC=$!
+roslaunch bwi_launch two_robot_simulation.launch & > /dev/null
 sleep 60    # wait for launch file to fully deployed
-
 exec "${@}"
-
-killall -9 gzserver
-killall -9 rosmaster
-kill -9 $SIMULATOR_PROC
+killall rosmaster
