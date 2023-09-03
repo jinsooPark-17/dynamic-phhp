@@ -83,6 +83,10 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     catkin config --init
     bash -c "source /opt/ros/melodic/setup.bash; catkin build -j6"  # Use -j2 if machine is slow
 
+    # Install Dynamic-PHHP dependencies
+    apt-get install -y python3-pip
+    pip3 install torch numpy pyYAML rospkg netifaces mpi4py
+
 %environment
     # fix locale::facet::_5_create_c_locale name not valid error
     export LANG="C"
