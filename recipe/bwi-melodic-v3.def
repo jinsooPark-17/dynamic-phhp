@@ -1,0 +1,15 @@
+BootStrap: docker
+From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
+
+%labels
+
+%help
+    Test if set environment variable is working.
+%files
+
+%post
+
+%environment
+    # ros
+    export ROS_HOSTNAME=localhost
+    export ROS_MASTER_URI=http://localhost:11311

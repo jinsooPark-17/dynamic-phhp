@@ -1,0 +1,12 @@
+BootStrap: docker
+From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
+
+%labels
+
+%help
+    MPI work. The %runscript is the source of issue.
+%files
+
+%post
+
+%environment

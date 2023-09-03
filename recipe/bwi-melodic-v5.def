@@ -4,14 +4,14 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 %labels
 
 %help
-
+    Test with full recipe
 %files
-c
+
 %post
     export ROS_DISTRO=melodic
     export DEBIAN_FRONTEND=noninteractive
 
-    apt-get update && apt-get install -y apt-utils curl nano vim tmux python-pip
+    apt-get update && apt-get install -y gnupg apt-utils curl nano vim tmux python-pip
     echo 'deb http://packages.ros.org/ros/ubuntu bionic main' > /etc/apt/sources.list.d/ros-latest.list
     curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add -
 
@@ -45,8 +45,6 @@ c
     cd /bwi_ws
     catkin config --init
     bash -c "source /opt/ros/melodic/setup.bash; catkin build -j6"  # Use -j2 if machine is slow
-
-%runscript
 
 %environment
     # ros
