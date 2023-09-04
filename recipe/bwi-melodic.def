@@ -51,10 +51,14 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     pip3 install torch numpy pyYAML rospkg netifaces mpi4py matplotlib
 
 %environment
-    # fix locale::facet::_5_create_c_locale name not valid error
-    export LANG="C"
-    export LC_ALL="C"
+    # mvapich2
+    export MV2_SMP_USE_CMA=0
+    export MV2_ENABLE_AFFINITY=0
 
     # ros
     export ROS_HOSTNAME=localhost
     export ROS_MASTER_URI=http://localhost:11311
+
+    # fix locale::facet::_5_create_c_locale name not valid error
+    export LANG="C"
+    export LC_ALL="C"
