@@ -61,7 +61,8 @@ class L_Hallway_Single_robot(Gazebo):
             if self.robot1.is_arrived():
                 break
             self.rate.sleep()
-
+        self.rate.sleep()
+        
         return self.robot1.ttd # self.robot1.trajectory
 
 class I_Hallway(Gazebo):

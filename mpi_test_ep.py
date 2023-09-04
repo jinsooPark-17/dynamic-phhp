@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import mpi4py
 mpi4py.rc.recv_mprobe = False
 from mpi4py import MPI
@@ -29,12 +30,12 @@ if __name__ == "__main__":
     n_valid = comm.reduce(valid, op=MPI.SUM, root=0)
     comm.Barrier()
     if rank == 0:
-        print(f"Running episode with {n_valid}/{size} simulators")
+        print(f"Running episode with {n_valid}/{size} simulators", flush=True)
     
     # Now, run episode
     ttd = env.begin([init_pose], [Pose(0., 0., np.pi/4.)])
     if type(ttd) is float:
-        print(f"[{gethostname()}-{rank:02d}] Episode TTD: {ttd:.2f} s")
+        print(f"[{gethostname()}-{rank:02d}] Episode TTD: {ttd:.2f} s", flush=True)
     else:
         print(f"Simulator {rank+1} failed.")
 
@@ -42,4 +43,5 @@ if __name__ == "__main__":
 
     if rank == 0:
         avg_ep_ttd = avg_ep_ttd / float(n_valid)
-        print(f"\nAverage TTD of single episode: {avg_ep_ttd:.3f} seconds")
+        print(f"\nAverage TTD of single episode: {avg_ep_ttd:.3f} seconds", flush=True)
+    os.system("killall rosmaster")
