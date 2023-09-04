@@ -19,7 +19,7 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     apt-get install -y ros-${ROS_DISTRO}-desktop-full python-rosdep python-rosinstall python-rosinstall-generator \
                        python-wstool build-essential python-catkin-tools libqt5websockets5-dev qt5-default psmisc
     pip install -U pyYAML
-    rosdep init
+    rosdep init && rosdep update
 
     ####################################
     # Install bwi repositories (light) #
