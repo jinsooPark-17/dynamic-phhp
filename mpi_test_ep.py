@@ -44,4 +44,6 @@ if __name__ == "__main__":
     if rank == 0:
         avg_ep_ttd = avg_ep_ttd / float(n_valid)
         print(f"\nAverage TTD of single episode: {avg_ep_ttd:.3f} seconds", flush=True)
-    os.system("killall rosmaster")
+
+    comm.Barrier()
+    os.system("killall rosmaster")  # Kill ROS to purge sbatch job
