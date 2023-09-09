@@ -50,7 +50,7 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     pip3 install torch numpy pyYAML rospkg netifaces mpi4py matplotlib
 
     rosdep init && rosdep update
-    sudo apt-get upgrade
+    apt-get upgrade -y
 
 %environment
     # mvapich2
