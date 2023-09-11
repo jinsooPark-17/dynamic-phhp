@@ -1,6 +1,3 @@
 #!/bin/bash
 source /bwi_ws/devel/setup.bash
-roslaunch bwi_launch two_robot_simulation.launch > /dev/null 2>&1 &
-sleep 60    # wait for launch file to fully deployed
 exec "${@}"
-killall rosmaster
