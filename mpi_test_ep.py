@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
     # Launch ROS environment
     time.sleep( rank % 12 ) # distribute work load to avoid heavy load
-    roslaunch = Popen([], stdout=DEVNULL) # stderr=DEVNULL
+    roslaunch = Popen(["roslaunch", "bwi_launch", "two_robot_simulation.launch"], stdout=DEVNULL) # stderr=DEVNULL
     time.sleep( 60.0 )  # wait for roslaunch to fully deployed
     comm.Barrier()
     if rank == 0:

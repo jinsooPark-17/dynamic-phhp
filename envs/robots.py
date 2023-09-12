@@ -27,6 +27,7 @@ class AllinOne(object):
         self.id = id
         self.policy = policy
 
+        self.ttd: float = None
         self.goal = MoveBaseGoal()
         self.pose = PoseWithCovarianceStamped().pose.pose   # Pose() msg
         self.trajectory = np.zeros(shape=(0,3), dtype=np.float32)
@@ -145,7 +146,7 @@ class AllinOne(object):
         ]
         self.pose = msg.pose.pose
 
-        self.pub_localize.publish(msg)
+        self.__pub_localize.publish(msg)
 
     def hallucinate(self):
         raise NotImplementedError()
@@ -191,6 +192,7 @@ class AllinOne(object):
         elif mode == "d-phhp":
             self.policy.load_state_dict( torch.load(kwargs['network_dir']) )# load policy
 
+        self.ttd = rospy.Time.now()
         self.__move_base.send_goal(
             goal        = self.goal,
             # active_cb   = None,
@@ -211,6 +213,14 @@ class AllinOne(object):
             self.stop()
     def stop(self):
         self.__move_base.cancel_all_goals()
+    def is_running(self):
+        if self.__move_base.get_result() is None:
+            return True
+        if type(self.ttd) is not float:
+            self.ttd = (rospy.Time.now() - self.ttd).to_sec()
+        return False
+    def is_arrived(self):
+        return (self.__move_base.get_state() == 3)
 
     def get_state(self, ):
         state = torch.zeros(size=(640*2+2+1,), dtype=torch.float32)
