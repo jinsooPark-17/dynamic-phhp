@@ -60,7 +60,7 @@ class L_Hallway_Single_robot(Gazebo):
 
         # wait for episode to finish
         while not rospy.is_shutdown():
-            if self.robot1.is_running():
+            if not self.robot1.is_running():
                 break
             self.rate.sleep()
 
