@@ -1,5 +1,6 @@
 #/usr/bin/env python3
 import os
+import time
 import torch
 import numpy as np
 from copy import deepcopy
@@ -22,8 +23,10 @@ def quaternion_to_yaw(q):
     return yaw
 
 class AllinOne(object):
-    def __init__(self, id: str = "", policy = None):
+    def __init__(self, id: str = "", policy = None, debug: str=""):
         # define variables
+        print(f"{debug}: Define ROBOT")
+        start_time = time.time()
         self.id = id
         self.policy = policy
 
@@ -37,15 +40,21 @@ class AllinOne(object):
         self.raw_scan = torch.zeros(size=(640,), dtype=torch.float32)
         self.hal_scan = torch.zeros(size=(640,), dtype=torch.float32)
         self.cmd_vel  = torch.zeros(size=(  4,), dtype=torch.float32)
+        if debug: print(f"\t{debug}: Define variables took {time.time() - start_time:.3f} sec")
 
         # Connect to ROS MoveBase
+        start_time = time.time()
         self.__move_base = SimpleActionClient(
             os.path.join(self.id, "move_base"),
             MoveBaseAction
         )
-        self.connected = self.__move_base.wait_for_server(timeout=rospy.Duration(60.0))
+        if debug: print(f"\t{debug}: Define move_base took {time.time() - start_time:.3f} sec")
+        start_time = time.time()
+        self.connected = self.__move_base.wait_for_server(timeout=rospy.Duration(10.0))
+        if debug: print(f"\t{debug}: move_base.wait_for_server took {time.time() - start_time:.3f} sec")
 
         # Define ROS services
+        start_time = time.time()
         self.__make_plan_srv = rospy.ServiceProxy(
             os.path.join(self.id, "move_base", "make_plan"),    # "$ID/move_base/NavfnROS/make_plan"
             GetPlan
@@ -58,8 +67,10 @@ class AllinOne(object):
             os.path.join(self.id, "clear_virtual_circles"),
             Empty
         )
+        if debug: print(f"\t{debug}: Define ros service took {time.time() - start_time:.3f} sec")
 
         # Define ROS publisher
+        start_time = time.time()
         self.__pub_localize = rospy.Publisher(
             os.path.join(self.id, "initialpose"),
             PoseWithCovarianceStamped,
@@ -70,8 +81,10 @@ class AllinOne(object):
             PolygonStamped,
             queue_size=10
         )
+        if debug: print(f"\t{debug}: Define ROS publisher took {time.time() - start_time:.3f} sec")
 
         # Define ROS subscriber
+        start_time = time.time()
         self.__sub_raw_scan = rospy.Subscriber(
             os.path.join(self.id, "scan_filtered"),
             LaserScan, 
@@ -87,17 +100,20 @@ class AllinOne(object):
             Twist,
             self.__cmd_vel_cb
         )
+        if debug: print(f"\t{debug}: Define subscriber took {time.time() - start_time:.3f} sec")
 
     def __raw_scan_cb(self, msg):
         self.raw_scan = torch.nan_to_num(
             torch.tensor(msg.ranges, dtype=torch.float32) / (msg.range_max - msg.range_min),
             nan = 0.0
         )
+
     def __hal_scan_cb(self, msg):
         self.hal_scan = torch.nan_to_num(
             torch.tensor(msg.ranges, dtype=torch.float32) / (msg.range_max - msg.range_min),
             nan = 0.0
         )
+
     def __cmd_vel_cb(self, msg):
         self.cmd_vel[0] = msg.linear.x
         self.cmd_vel[1] = msg.angular.z
@@ -111,12 +127,14 @@ class AllinOne(object):
             self.__clear_costmap_srv()
         except rospy.ServiceException as e:
             raise RuntimeError(f"{self.id}: {e}")
+
     def clear_hallucination(self):
         rospy.wait_for_service( os.path.join(self.id, "clear_virtual_circles") )
         try:
             self.__clear_hallucination_srv()
         except rospy.ServiceException as e:
             raise RuntimeError(f"{self.id}: {e}")
+
     def make_plan(self, req):
         rospy.wait_for_service( os.path.join(self.id, "move_base", "NavfnROS", "make_plan") )
         # rospy.wait_for_service( os.path.join(self.id, "move_base", "make_plan") )
@@ -150,6 +168,7 @@ class AllinOne(object):
 
     def hallucinate(self):
         raise NotImplementedError()
+
     def perceptual_hallucination(self, radius=1.0, dr=0.05, p_min=0.2, p_max=0.8):
         # Get plan as numpy array
         plan_req = GetPlanRequest()
@@ -199,6 +218,7 @@ class AllinOne(object):
             feedback_cb = self.feedback_cb,
             # done_cb     = None
         )
+
     def feedback_cb(self, feedback):
         self.pose = feedback.base_position.pose
         self.trajectory[self.traj_idx] = [
@@ -211,14 +231,17 @@ class AllinOne(object):
         # Timeout
         if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
             self.stop()
+
     def stop(self):
         self.__move_base.cancel_all_goals()
+
     def is_running(self):
         if self.__move_base.get_result() is None:
             return True
         if type(self.ttd) is not float:
             self.ttd = (rospy.Time.now() - self.ttd).to_sec()
         return False
+
     def is_arrived(self):
         return (self.__move_base.get_state() == 3)
 

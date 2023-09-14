@@ -18,27 +18,26 @@ if __name__ == "__main__":
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
-    print(f"{gethostname}: {rank} MPI job is ready", flush=True)
 
     # Launch ROS environment
     time.sleep( rank % 12 ) # distribute work load to avoid heavy load
-    roslaunch = Popen(["roslaunch", "bwi_launch", "two_robot_simulation.launch"], stdout=DEVNULL) # stderr=DEVNULL
+    roslaunch = Popen(["roslaunch", "bwi_launch", "two_robot_simulation.launch", "--screen"], stdout=DEVNULL, stderr=DEVNULL)
     time.sleep( 60.0 )  # wait for roslaunch to fully deployed
     comm.Barrier()
     if rank == 0:
         print(f"All simulation is launched.", flush=True)
 
     # Choose robot
-    env = L_Hallway_Single_robot(ep_timeout=30.0)
+    env = L_Hallway_Single_robot(ep_timeout=30.0, debug=f"{gethostname()}-{rank:03d}")
     idx = np.random.choice(2)
     name, init_pose = [["marvin", Pose(-10,0,0)], ["rob", Pose(0, -10, np.pi/2.)]][idx]
-    robot1 = AllinOne( name )
+    robot1 = AllinOne( name, debug=f"{gethostname}-{rank:03d}" )
     env.register_robots(robot1=robot1)
 
     # Print total number of available simulations
     valid = robot1.connected
     n_valid = comm.reduce(valid, op=MPI.SUM, root=0)
-    comm.Barrier()
+    start_time = time.time()
     if rank == 0:
         print(f"Running episode with {n_valid}/{size} simulators", flush=True)
     
@@ -46,12 +45,11 @@ if __name__ == "__main__":
     if valid is True:
         ttd = env.begin([init_pose], [Pose(0., 0., np.pi/4.)])
         if type(ttd) is float:
-            print(f"[{gethostname()}-{rank:02d}] Episode TTD: {ttd:.2f} s", flush=True)
+            print(f"[{gethostname().split('.')[0]}-{rank:03d}] Episode TTD: {ttd:.2f} s : {time.time() - start_time:.2f} sec", flush=True)
         else:
             print(f"Simulator {rank+1} failed.")
     else:
         ttd = 0.0
-
     avg_ep_ttd = comm.reduce(ttd, op=MPI.SUM, root=0)
 
     if rank == 0:

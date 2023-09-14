@@ -20,6 +20,9 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
                        python-wstool build-essential python-catkin-tools libqt5websockets5-dev qt5-default psmisc
     pip install -U pyYAML
 
+    # disble roslog
+    echo "log4j.threshold=OFF" > /rosconsole.config
+
     ####################################
     # Install bwi repositories (light) #
     ####################################
@@ -60,6 +63,8 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     # ros
     export ROS_HOSTNAME=localhost
     export ROS_MASTER_URI=http://localhost:11311
+    export ROSOUT_DISABLE_FILE_LOGGING=True
+    export ROSCONSOLE_CONFIG_FILE=/rosconsole.config
 
     # fix locale::facet::_5_create_c_locale name not valid error
     export LANG="C"
