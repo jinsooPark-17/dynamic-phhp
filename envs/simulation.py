@@ -17,7 +17,7 @@ class Gazebo:
             print(f"\t\t{debug}: current rospy.Time is {rospy.Time.now().to_sec():.3f} sec")
 
         start_time = time.time()
-        while not rospy.is_shutdown() and (60.0 < rospy.Time.now().to_sec() < 1e+6):
+        while not rospy.is_shutdown() and not (60.0 < rospy.Time.now().to_sec() < 1e+6):
             time.sleep(0.1)
         if debug:
             print(f"\t\t{debug}: Wait for (ROS_Time > 60.0) took {time.time() - start_time:.3f} sec")

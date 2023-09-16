@@ -20,10 +20,16 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
                        python-wstool build-essential python-catkin-tools libqt5websockets5-dev qt5-default psmisc
     pip install -U pyYAML
 
-    # disble roslog
+    # disble log4j
     echo "log4j.threshold=OFF" >> /rosconsole.config
-    echo "log4j.logger.ros=ERROR" >> /rosconsole.config
-    echo "log4j.logger.ros.roscpp.superdebug=ERROR" >> /rosconsole.config
+    echo "log4j.logger.ros=FATAL" >> /rosconsole.config
+    echo "log4j.logger.ros.roscpp.superdebug=FATAL" >> /rosconsole.config
+
+    # Edit gazebo URI changable
+
+    export GAZEBO_MASTER_URI=http://localhost:11345
+    export GAZEBO_MASTER_URI=${GAZEBO_MASTER_URI:-"http://localhost:11345"}
+    sed -i 's@http://localhost:11345@${GAZEBO_MASTER_URI:-"http://localhost:11345"}@g' /usr/share/gazebo/setup.sh
 
     ####################################
     # Install bwi repositories (light) #
@@ -59,12 +65,12 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 
 %environment
     # mvapich2
-    export MV2_SMP_USE_CMA=0
-    export MV2_ENABLE_AFFINITY=0
+    # export MV2_SMP_USE_CMA=0
+    # export MV2_ENABLE_AFFINITY=0
 
     # ros
-    export ROS_HOSTNAME=localhost
-    export ROS_MASTER_URI=http://localhost:11311
+    # export ROS_HOSTNAME=localhost
+    # export ROS_MASTER_URI=http://localhost:11311
     export ROSOUT_DISABLE_FILE_LOGGING=True
     export ROSCONSOLE_CONFIG_FILE=/rosconsole.config
 
