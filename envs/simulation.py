@@ -9,18 +9,17 @@ from gazebo_msgs.srv import SetModelState
 
 class Gazebo:
     def __init__(self, debug: str=""):
-        if debug: print(f"\t{debug}: Gazebo class")
         start_time = time.time()
         rospy.init_node("environment", anonymous=True)
         if debug:
-            print(f"\t\t{debug}: rospy.init_node took {time.time() - start_time:.3f} sec")
-            print(f"\t\t{debug}: current rospy.Time is {rospy.Time.now().to_sec():.3f} sec")
+            ros_t = rospy.Time.now().to_sec()
+            print(f"{debug}: rospy.init_node took {time.time() - start_time:.3f} sec")
 
         start_time = time.time()
         while not rospy.is_shutdown() and not (60.0 < rospy.Time.now().to_sec() < 1e+6):
             time.sleep(0.1)
         if debug:
-            print(f"\t\t{debug}: Wait for (ROS_Time > 60.0) took {time.time() - start_time:.3f} sec")
+            print(f"{debug}: wait for (ROS_Time {ros_t:.3f} -> {rospy.Time.now().to_sec():.3f}) took {time.time() - start_time:.3f} sec")
 
         self.teleport_srv = rospy.ServiceProxy(
             "/gazebo/set_model_state", SetModelState
@@ -43,12 +42,10 @@ class Gazebo:
 class L_Hallway_Single_robot(Gazebo):
     def __init__(self, ep_timeout: float=60.0, debug: str=""):
         super().__init__(debug)
-        if debug: print(f"\t{debug}: Single_robot class")
         start_time = time.time()
         self.robot1 = None
         self.timeout = ep_timeout
         self.rate = rospy.Rate(100)
-        if debug: print(f"\t\t{debug}: registration took {time.time() - start_time:.3f} sec")
 
     def register_robots(self, robot1):
         self.robot1 = robot1

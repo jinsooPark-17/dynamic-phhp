@@ -1,3 +1,15 @@
 #!/bin/bash
 source /bwi_ws/devel/setup.bash
+
+# define ports
+ROS_PORT=$((11311+20*$PMI_RANK))
+GAZEBO_PORT=$((11321+20*$PMI_RANK))
+export ROS_HOSTNAME=$HOSTNAME
+export ROS_MASTER_URI=http://$ROS_HOSTNAME:$ROS_PORT
+export GAZEBO_MASTER_URI=http://$ROS_HOSTNAME:$GAZEBO_PORT
+
+# launch ROS+Gazebo simulation
+sleep $((2*($PMI_RANK%12))) # distribute work load
+roslaunch bwi_launch two_robot_simulation.launch --screen -p $ROS_PORT > /dev/null
+sleep 30
 exec "${@}"
