@@ -46,10 +46,10 @@ class AllinOne(object):
             os.path.join(self.id, "move_base"),
             MoveBaseAction
         )
-        if debug: print(f"  {debug}: Define move_base took {time.time() - start_time:.3f} sec")
+        if debug: print(f"  {debug}: Define move_base took {time.time() - start_time:.3f} sec", flush=True)
         start_time = time.time()
         self.connected = self.__move_base.wait_for_server(timeout=rospy.Duration(10.0))
-        if debug: print(f"  {debug}: move_base.wait_for_server took {time.time() - start_time:.3f} sec")
+        if debug: print(f"  {debug}: move_base.wait_for_server took {time.time() - start_time:.3f} sec", flush=True)
 
         # Define ROS services
         start_time = time.time()
@@ -65,7 +65,7 @@ class AllinOne(object):
             os.path.join(self.id, "clear_virtual_circles"),
             Empty
         )
-        if debug: print(f"  {debug}: Define ros service took {time.time() - start_time:.3f} sec")
+        if debug: print(f"  {debug}: Define ros service took {time.time() - start_time:.3f} sec", flush=True)
 
         # Define ROS publisher
         start_time = time.time()
@@ -79,7 +79,7 @@ class AllinOne(object):
             PolygonStamped,
             queue_size=10
         )
-        if debug: print(f"  {debug}: Define ROS publisher took {time.time() - start_time:.3f} sec")
+        if debug: print(f"  {debug}: Define ROS publisher took {time.time() - start_time:.3f} sec", flush=True)
 
         # Define ROS subscriber
         start_time = time.time()
@@ -98,7 +98,7 @@ class AllinOne(object):
             Twist,
             self.__cmd_vel_cb
         )
-        if debug: print(f"  {debug}: Define subscriber took {time.time() - start_time:.3f} sec")
+        if debug: print(f"  {debug}: Define subscriber took {time.time() - start_time:.3f} sec", flush=True)
 
     def __raw_scan_cb(self, msg):
         self.raw_scan = torch.nan_to_num(
