@@ -26,9 +26,6 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     echo "log4j.logger.ros.roscpp.superdebug=FATAL" >> /rosconsole.config
 
     # Edit gazebo URI changable
-
-    export GAZEBO_MASTER_URI=http://localhost:11345
-    export GAZEBO_MASTER_URI=${GAZEBO_MASTER_URI:-"http://localhost:11345"}
     sed -i 's@http://localhost:11345@${GAZEBO_MASTER_URI:-"http://localhost:11345"}@g' /usr/share/gazebo/setup.sh
 
     ####################################
@@ -68,9 +65,12 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     # export MV2_SMP_USE_CMA=0
     # export MV2_ENABLE_AFFINITY=0
 
-    # ros
+    # set rosmaster URI
     # export ROS_HOSTNAME=localhost
-    # export ROS_MASTER_URI=http://localhost:11311
+    # export ROS_MASTER_URI=http://${ROS_HOSTNAME}:11311
+    # export GAZEBO_MASTER_URI=http://${ROS_HOSTNAME}:11411
+
+    # disable logging
     export ROSOUT_DISABLE_FILE_LOGGING=True
     export ROSCONSOLE_CONFIG_FILE=/rosconsole.config
 
