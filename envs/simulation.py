@@ -4,6 +4,7 @@ import numpy as np
 from math import sin, cos
 
 import rospy
+from envs.robots import AllinOne
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
 
@@ -11,15 +12,25 @@ class Gazebo:
     def __init__(self, debug: str=""):
         start_time = time.time()
         rospy.init_node("environment", anonymous=True)
-        if debug:
-            ros_t = rospy.Time.now().to_sec()
-            print(f"{debug}: rospy.init_node took {time.time() - start_time:.3f} sec", flush=True)
 
         start_time = time.time()
-        while not rospy.is_shutdown() and not (60.0 < rospy.Time.now().to_sec() < 1e+6):
+        while not rospy.is_shutdown() and rospy.Time.is_zero():
             time.sleep(0.1)
+            launch_latency = time.time() - start_time
+            if launch_latency > 1200.0:
+                raise rospy.ROSInitException("!!!ROSlaunch does not deployed after 20 minutes!!!")
+
+        start_time = time.time()
+        while not rospy.is_shutdown() and 60.0 < rospy.get_time():
+            ros_t = rospy.Time.now()
+            time.sleep(0.1)
+            if (rospy.Time.now() - ros_t).is_zero():
+                # Something went wrong!!
+                raise rospy.ROSInitException("!!!ROS Time is frozen!!!")
+        develop_latency = time.time() - start_time
+
         if debug:
-            print(f"{debug}: wait for (ROS_Time {ros_t:.3f} -> {rospy.Time.now().to_sec():.3f}) took {time.time() - start_time:.3f} sec", flush=True)
+            print(f"{debug}:\n  roslaunch took {launch_latency:.2f} seconds for rosmaster.\n  ros node  took {develop_latency:.2f} seconds for Gazebo simulation to fully developed", flush=True)
 
         self.teleport_srv = rospy.ServiceProxy(
             "/gazebo/set_model_state", SetModelState
@@ -38,6 +49,73 @@ class Gazebo:
             rospy.sleep(1.0)
         except (rospy.ServiceException) as e:
             raise RuntimeError("Gazebo: set_model_state does not respond.")
+
+class I_Shaped_Hallway(Gazebo):
+    def __init__(self, debug: str=""):
+        super().__init__(debug)
+        self.robot1 = AllinOne("marvin")
+        self.robot2 = AllinOne("rob")
+    
+    def reset(self, init_poses):
+        r1_init, r2_init = init_poses
+
+        # stop robots to avoid duplicated goal
+        self.robot1.stop()
+        self.robot2.stop()
+        rospy.sleep(1.0)
+
+        # clear hallucination remnent
+        self.robot1.clear_hallucination()
+        self.robot2.clear_hallucination()
+        rospy.sleep(1.0)
+
+        # teleport robots to initial pose
+        self.teleport(self.robot1.id, r1_init.x, r1_init.y, r1_init.yaw)
+        self.teleport(self.robot2.id, r2_init.x, r2_init.y, r2_init.yaw)
+        rospy.sleep(1.0)
+
+        # localize robots
+        for _ in range(10):
+            self.robot1.localize(r1_init.x, r1_init.y, r1_init.yaw)
+            self.robot2.localize(r2_init.x, r2_init.y, r2_init.yaw)
+            rospy.sleep(0.1)
+        rospy.sleep(1.0)    
+
+        # clear costmaps
+        self.robot1.clear_costmap()
+        self.robot2.clear_costmap()
+        rospy.sleep(1.0)
+
+    def test_precision(self, init_poses, goal_poses, timeout: float=30.0):
+        # randomize init & goal position
+        if np.random.normal() > 0.0:
+            init_poses = init_poses[::-1]
+            goal_poses = goal_poses[::-1]
+        self.reset(init_poses)
+
+        # Assume both robots are vanilla robots
+        self.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="vanilla", timeout=timeout)
+        self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, move="vanilla", timeout=timeout)
+
+        while self.robot1.is_running() or self.robot2.is_running():
+            if rospy.is_shutdown():
+                raise rospy.ROSInterruptException("ROS shutdown while running episode")
+            rospy.sleep(0.1)
+
+        # return ttd and percision error (r, th)
+        ttd1 = self.robot1.ttd
+        last_loc1 = self.robot1.trajectory[self.robot1.traj_idx-1]
+        dx1, dy1 = goal_poses[0].x - last_loc1[0], goal_poses[0].y - last_loc1[1]
+        r1 = np.linalg.norm([dx1, dy1])
+        th1 = np.arctan2(dy1, dx1)
+
+        ttd2 = self.robot2.ttd
+        last_loc2 = self.robot2.trajectory[self.robot2.traj_idx-1]
+        dx2, dy2 = goal_poses[1].x - last_loc2[0], goal_poses[1].y - last_loc2[1]
+        r2 = np.linalg.norm([dx2, dy2])
+        th2 = np.arctan2(dy2, dx2)
+
+        return np.array([[ttd1, r1, th1], [ttd2, r2, th2]])
 
 class L_Hallway_Single_robot(Gazebo):
     def __init__(self, ep_timeout: float=60.0, debug: str=""):

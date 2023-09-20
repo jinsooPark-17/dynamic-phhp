@@ -24,8 +24,8 @@ if __name__=="__main__":
     # Setup system environment
     hostname    = gethostname()
     LOCAL_RANK  = int(os.getenv('MV2_COMM_WORLD_LOCAL_RANK'))
-    ros_port    = 11311 + 20 * LOCAL_RANK #rank
-    gazebo_port = 11321 + 20 * LOCAL_RANK #rank
+    ros_port    = 11311 + 20 * LOCAL_RANK
+    gazebo_port = 11321 + 20 * LOCAL_RANK
     LOG_DIR     = uuid.uuid4().__str__()
     os.environ["ROS_LOG_DIR"]       = f"{os.getenv('SCRATCH')}/roslog/{LOG_DIR}"
     os.environ["ROS_HOSTNAME"]      = hostname
