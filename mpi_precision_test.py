@@ -67,7 +67,7 @@ if __name__=="__main__":
         start_time = time.time()
         N_EPISODES_PER_JOB  = int(args.num_test / n_available)
         if not os.path.exists("data.csv"):
-            with open("data.csv", 'wb') as f:
+            with open("data.csv", 'w') as f:
                 f.write("ttd,r,theta\n")
     else:
         N_EPISODES_PER_JOB = None
