@@ -14,19 +14,22 @@ class Gazebo:
         rospy.init_node("environment", anonymous=True)
 
         start_time = time.time()
-        while not rospy.is_shutdown() and rospy.Time.is_zero():
+        launch_latency = 0.0
+        while not rospy.is_shutdown() and rospy.Time.now().is_zero():
             time.sleep(0.1)
             launch_latency = time.time() - start_time
             if launch_latency > 1200.0:
                 raise rospy.ROSInitException("!!!ROSlaunch does not deployed after 20 minutes!!!")
+        rospy.sleep(5.0)
 
         start_time = time.time()
-        while not rospy.is_shutdown() and 60.0 < rospy.get_time():
-            ros_t = rospy.Time.now()
+        rost_hist, idx = np.zeros(100), 0
+        while not rospy.is_shutdown() and rospy.get_time() < 60.0:
+            rost_hist[idx] = rospy.get_time()
+            idx = (idx+1) % 100
             time.sleep(0.1)
-            if (rospy.Time.now() - ros_t).is_zero():
-                # Something went wrong!!
-                raise rospy.ROSInitException("!!!ROS Time is frozen!!!")
+            if (rost_hist[idx-1] - rost_hist[idx]) < 1e-3:
+                raise rospy.ROSInitException(f"!!!ROS Time is frozen!!!\n{rost_hist}")
         develop_latency = time.time() - start_time
 
         if debug:

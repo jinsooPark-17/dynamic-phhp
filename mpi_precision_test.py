@@ -38,33 +38,36 @@ if __name__=="__main__":
     os.environ["ROS_HOSTNAME"]      = hostname
     os.environ["ROS_MASTER_URI"]    = f"http://{hostname}:{ros_port}"
     os.environ["GAZEBO_MASTER_URI"] = f"http://{hostname}:{gazebo_port}"
-    print(f"Connecting to {os.getenv('ROS_MASTER_URI')}", flush=True)
+
     # launch simulation
-    time.sleep( (rank // 12) * 5 ) # distribute jobs
-    start_time = time.time()
+    time.sleep( rank % 16 )
     subprocess.Popen(
         ["roslaunch", "bwi_launch", "two_robot_simulation.launch", "--screen", "-p", f"{ros_port}"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    time.sleep(30.0)    # wait for all roslaunch to started
+    time.sleep(60.0)    # wait for all roslaunch to started
 
     # define environment
     MPI_ID = f"[{gethostname().split('.')[0]}-{rank:03d}]"
     try:
-        env = I_Shaped_Hallway(debug=MPI_ID)
-        init_poses = [Pose(-10.0, 0.0, 0.0), Pose(0.0,   0.0, np.pi/2.)]
-        goal_poses = [Pose(  0.0, 0.0, 0.0), Pose(0.0, -10.0, np.pi/2.)]
+        start_time = time.time()
+        env = I_Shaped_Hallway() #(debug=MPI_ID)
+        init_poses = [Pose(-10.0, 0.0, 0.0), Pose(0.0,  -2.0, -np.pi/2.)]
+        goal_poses = [Pose( -2.0, 0.0, 0.0), Pose(0.0, -10.0, -np.pi/2.)]
         valid = True
     except rospy.ROSInitException as e:
         valid = False
     
     # define number of episodes per MPI job
     n_available = comm.reduce(valid, op=MPI.SUM, root=0)
+    print(f"{MPI_ID} took {time.time()-start_time:.2f} seconds for preparation", flush=True)
+    comm.Barrier()
     if rank == 0:
+        print(f"Working with {n_available}/{size} simulations", flush=True)
         start_time = time.time()
         N_EPISODES_PER_JOB  = int(args.num_test / n_available)
         if not os.path.exists("data.csv"):
-            with open("data.csv", 'w') as f:
+            with open("data.csv", 'wb') as f:
                 f.write("ttd,r,theta\n")
     else:
         N_EPISODES_PER_JOB = None
@@ -76,24 +79,24 @@ if __name__=="__main__":
         for i in range(N_EPISODES_PER_JOB):
             result = env.test_precision(init_poses, goal_poses, timeout=30.0)
             sendbuf[2*i:2*i+2] = result
-        print(f"{MPI_ID}: Average TTD of {N_EPISODES_PER_JOB} single robot episodes: {sendbuf.mean()[0]}")
+        print(f"{MPI_ID}: Average TTD of {N_EPISODES_PER_JOB} single robot episodes: {sendbuf.mean(axis=0)[0]}", flush=True)
     else:
-        print(f"{MPI_ID}: Simulator failed.")
+        print(f"{MPI_ID}: Simulator failed.", flush=True)
 
     # Collect data from rank 0 MPI job
+    recvbuf = None
     if rank == 0:
-        recvbuf = np.empty([size, N_EPISODES_PER_JOB*2], np.float32)
+        recvbuf = np.empty([size, N_EPISODES_PER_JOB*2, 3], np.float32)
     comm.Gather(sendbuf, recvbuf, root=0)
     if rank == 0:
         # filter out zero row
-        idx = (np.linalg.norm(recvbuf, axis=1) == 0)
+        idx = (np.linalg.norm(recvbuf, axis=(1,2)) != 0)
         recvbuf = recvbuf[idx].reshape(-1, 3)
         # store data to data.csv file
-        import pandas as pd
-        df = pd.DataFrame(recvbuf)
-        df.to_csv("data.csv", mode='a', index=False, header=False)
-        print(f"\n\n{np.argwhere(idx is True)} simulations does not work.", flush=True)
-        print(f"MPI job took total {time.time() - start_time:.2f} seconds.", flush=True)
-        print(f"Average TTD of single episode: {recvbuf.mean()[0]:.2f} seconds", flush=True)
+        with open('data.csv', 'ab') as f:
+            np.savetxt(f, recvbuf)
+        if n_available != size: print(f"\n\n{np.argwhere(idx is True)} simulations does not work.")
+        print(f"MPI episodes took total {time.time() - start_time:.2f} seconds.")
+        print(f"Average TTD of single episode: {recvbuf.mean(axis=0)[0]:.2f} seconds.")
 
     os.system(f"rm -r $SCRATCH/roslog/{LOG_DIR}")

@@ -192,7 +192,7 @@ class AllinOne(object):
 
     def move(self, x: float, y: float, yaw: float, mode: str="vanilla", timeout: float=60.0, **kwargs):
         # Store trajectory from 20hz feedback loop
-        self.trajectory = np.zeros(shape=(int(20*timeout+1), 3), dtype=np.float32)
+        self.trajectory = np.zeros(shape=(int(20*(timeout+1)), 3), dtype=np.float32)
         self.traj_idx = 0
 
         self.goal.target_pose.header.frame_id = os.path.join(self.id, "level_mux_map")
