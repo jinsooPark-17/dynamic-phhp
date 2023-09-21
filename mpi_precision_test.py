@@ -3,6 +3,7 @@ import os
 import time
 import uuid
 import numpy as np
+import signal
 import mpi4py
 mpi4py.rc.recv_mprobe = False
 import argparse
@@ -41,9 +42,9 @@ if __name__=="__main__":
 
     # launch simulation
     time.sleep( rank % 16 )
-    subprocess.Popen(
+    sim_proc = subprocess.Popen(
         ["roslaunch", "bwi_launch", "two_robot_simulation.launch", "--screen", "-p", f"{ros_port}"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setsid
     )
     time.sleep(60.0)    # wait for all roslaunch to started
 
@@ -99,4 +100,7 @@ if __name__=="__main__":
         print(f"MPI episodes took total {time.time() - start_time:.2f} seconds.")
         print(f"Average TTD of single episode: {recvbuf.mean(axis=0)[0]:.2f} seconds.")
 
+    # Purge simulation and delete all logfiles
+    os.killpg( os.getpgid(sim_proc.pid), signal.SIGTERM )
+    sim_proc.wait()
     os.system(f"rm -r $SCRATCH/roslog/{LOG_DIR}")
