@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 import numpy as np
+import pandas as pd
 import mpi4py
 mpi4py.rc.recv_mprobe = False
 import subprocess
@@ -52,4 +53,8 @@ if __name__=='__main__':
     if rank==0: recv_arr = np.empty((size, n_test*2, 4))
     comm.Gather(data, recv_arr, root=0)
     if rank==0:
-        data = recv_arr.reshape(-1,4)
+        df = pd.DataFrame(recv_arr.reshape(-1,4), columns=["travel_dist", "ttd", "distance_error", "angle_error"])
+        df.to_csv(f"movebase_precision_result.{os.getenv('SLURM_JOB_ID')}.csv")
+
+        print(f"MoveBase precision experiment result with {size*n_test*2} episodes")
+        print(df.mean(axis=0))
