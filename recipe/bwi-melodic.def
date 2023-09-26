@@ -62,13 +62,12 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 
 %environment
     # mvapich2
-    # export MV2_SMP_USE_CMA=0
-    # export MV2_ENABLE_AFFINITY=0
+    export MV2_SMP_USE_CMA=0
 
     # set rosmaster URI
-    # export ROS_HOSTNAME=localhost
-    # export ROS_MASTER_URI=http://${ROS_HOSTNAME}:11311
-    # export GAZEBO_MASTER_URI=http://${ROS_HOSTNAME}:11411
+    export ROS_HOSTNAME=localhost
+    export ROS_MASTER_URI=http://${ROS_HOSTNAME}:11311
+    export GAZEBO_MASTER_URI=http://${ROS_HOSTNAME}:11345
 
     # disable logging
     export ROSOUT_DISABLE_FILE_LOGGING=True
@@ -77,3 +76,12 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     # fix locale::facet::_5_create_c_locale name not valid error
     export LANG="C"
     export LC_ALL="C"
+
+%runscript
+    source /bwi_ws/devel/setup.bash
+    exec "$@"
+
+%startscript
+    # Executed when the instance start command is issued
+    source /bwi_ws/devel/setup.bash
+    roslaunch bwi_launch two_robot_simulation.launch --screen
