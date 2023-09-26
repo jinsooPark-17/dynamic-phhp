@@ -6,8 +6,11 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 %help
     Final MPI available version of light bwi repo for TACC/LoneStar6.
 %files
-
+    extras/wait_until_stable /wait_until_stable
 %post
+    # make files executable
+    chmod +x /wait_until_stable
+
     export ROS_DISTRO=melodic
     export DEBIAN_FRONTEND=noninteractive
 
@@ -78,10 +81,11 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     export LC_ALL="C"
 
 %runscript
+    #!/bin/bash
     source /bwi_ws/devel/setup.bash
     exec "$@"
 
 %startscript
-    # Executed when the instance start command is issued
+    #!/bin/bash
     source /bwi_ws/devel/setup.bash
     roslaunch bwi_launch two_robot_simulation.launch --screen
