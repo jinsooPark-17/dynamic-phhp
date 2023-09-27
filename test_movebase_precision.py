@@ -21,7 +21,7 @@ if __name__=='__main__':
 
     available=True
     for n_restart in range(10): # Max restart 10 times
-        os.system(f"singularity instance start {os.getenv('CONTAINER')} {ID} > /dev/null 2>&1")
+        os.system(f"singularity instance start --net --network=none {os.getenv('CONTAINER')} {ID} > /dev/null 2>&1")
         time.sleep(5.0)
         test_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "/wait_until_stable"])
         try:

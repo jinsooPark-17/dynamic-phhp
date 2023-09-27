@@ -9,31 +9,8 @@ from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
 
 class Gazebo:
-    def __init__(self, debug: str=""):
-        start_time = time.time()
+    def __init__(self):
         rospy.init_node("environment", anonymous=True)
-
-        start_time = time.time()
-        launch_latency = 0.0
-        while not rospy.is_shutdown() and rospy.Time.now().is_zero():
-            time.sleep(0.1)
-            launch_latency = time.time() - start_time
-            if launch_latency > 1200.0:
-                raise rospy.ROSInitException("!!!ROSlaunch does not deployed after 20 minutes!!!")
-        rospy.sleep(5.0)
-
-        start_time = time.time()
-        rost_hist, idx = np.zeros(100), 0
-        while not rospy.is_shutdown() and rospy.get_time() < 60.0:
-            rost_hist[idx] = rospy.get_time()
-            idx = (idx+1) % 100
-            time.sleep(0.1)
-            if (rost_hist[idx-1] - rost_hist[idx]) < 1e-3:
-                raise rospy.ROSInitException(f"!!!ROS Time is frozen!!!\n{rost_hist}")
-        develop_latency = time.time() - start_time
-
-        if debug:
-            print(f"{debug}:\n  roslaunch took {launch_latency:.2f} seconds for rosmaster.\n  ros node  took {develop_latency:.2f} seconds for Gazebo simulation to fully developed", flush=True)
 
         self.teleport_srv = rospy.ServiceProxy(
             "/gazebo/set_model_state", SetModelState
