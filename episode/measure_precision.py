@@ -24,5 +24,5 @@ if __name__=="__main__":
         result[2*i:2*i+2] = np.hstack(([[d1],[d2]], ttd))
 
     # save numpy array to file
-    with open(args.storage, 'w') as f:
+    with open(args.storage, 'wb') as f:
         np.save(f, result)

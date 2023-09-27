@@ -8,7 +8,6 @@ mpi4py.rc.recv_mprobe = False
 import subprocess
 from mpi4py import MPI
 
-CONTAINER="bwi-melodic.simg"
 if __name__=='__main__':
     ID = uuid.uuid4()
     n_test = 30
@@ -22,7 +21,7 @@ if __name__=='__main__':
 
     available=True
     for n_restart in range(10): # Max restart 10 times
-        os.system(f"singularity instance start /tmp/{CONTAINER} {ID} > /dev/null 2>&1")
+        os.system(f"singularity instance start {os.getenv('CONTAINER')} {ID} > /dev/null 2>&1")
         time.sleep(5.0)
         test_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "/wait_until_stable"])
         try:
@@ -41,8 +40,9 @@ if __name__=='__main__':
         print(f"Maximum number of restart was {max_restart}.", flush=True)
 
     # Run episode
+    storage = f"/tmp/{ID}.result"
     ep_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", 
-                                "python3", "episode/measure_precision.py", f"/tmp/{ID}.result", f"{n_test}"])
+                                "python3", "episode/measure_precision.py", storage, f"{n_test}"])
     ep_proc.wait()
     comm.Barrier()
     os.system(f"singularity instance stop {ID} > /dev/null 2>&1")
