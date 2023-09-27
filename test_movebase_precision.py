@@ -42,7 +42,7 @@ if __name__=='__main__':
     # Run episode
     storage = f"/tmp/{ID}.result"
     for i_ep in range(n_test):
-        ep_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "python3", "episode/measure_precision.py", storage])
+        ep_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "python3", "./episode/measure_precision.py", storage])
         ep_proc.poll()
     comm.Barrier()
 
@@ -54,7 +54,7 @@ if __name__=='__main__':
     comm.Gather(data, recv_arr, root=0)
     if rank==0:
         df = pd.DataFrame(recv_arr.reshape(-1,4), columns=["travel_dist", "ttd", "distance_error", "angle_error"])
-        df.to_csv(f"movebase_precision_result.{os.getenv('SLURM_JOB_ID')}.csv")
+        df.to_csv(f"data/movebase_precision_result.{os.getenv('SLURM_JOB_ID')}.csv")
 
         print(f"MoveBase precision experiment result with {size*n_test*2} episodes")
         print(df.mean(axis=0))
