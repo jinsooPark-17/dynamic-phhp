@@ -8,6 +8,7 @@ from math import sin, cos, atan2
 
 import rospy
 from actionlib import SimpleActionClient
+from actionlib_msgs.msg import GoalStatus
 from std_srvs.srv import Empty
 from nav_msgs.srv import GetPlan, GetPlanRequest
 from sensor_msgs.msg import LaserScan
@@ -241,7 +242,7 @@ class AllinOne(object):
         return False
 
     def is_arrived(self):
-        return (self.__move_base.get_state() == 3)
+        return (self.__move_base.get_state() == GoalStatus.SUCCEEDED)
 
     def get_state(self, ):
         state = torch.zeros(size=(640*2+2+1,), dtype=torch.float32)

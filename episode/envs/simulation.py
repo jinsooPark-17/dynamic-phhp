@@ -50,16 +50,17 @@ class I_Shaped_Hallway(Gazebo):
         rospy.sleep(1.0)
 
         # teleport robots to initial pose
+        self.teleport(self.robot2.id, (r1_init.x+r2_init.x)/2., (r1_init.y+r2_init.y)/2., 0.0)
         self.teleport(self.robot1.id, r1_init.x, r1_init.y, r1_init.yaw)
         self.teleport(self.robot2.id, r2_init.x, r2_init.y, r2_init.yaw)
         rospy.sleep(1.0)
 
         # localize robots
-        for _ in range(10):
+        for _ in range(15):
             self.robot1.localize(r1_init.x, r1_init.y, r1_init.yaw)
             self.robot2.localize(r2_init.x, r2_init.y, r2_init.yaw)
             rospy.sleep(0.1)
-        rospy.sleep(1.0)    
+        rospy.sleep(2.0)    
 
         # clear costmaps
         self.robot1.clear_costmap()
@@ -75,7 +76,7 @@ class I_Shaped_Hallway(Gazebo):
 
         # Assume both robots are vanilla robots
         self.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="vanilla", timeout=timeout)
-        self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, move="vanilla", timeout=timeout)
+        self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode="vanilla", timeout=timeout)
 
         while self.robot1.is_running() or self.robot2.is_running():
             if rospy.is_shutdown():
@@ -84,18 +85,16 @@ class I_Shaped_Hallway(Gazebo):
 
         # return ttd and percision error (r, th)
         ttd1 = self.robot1.ttd
+        success1 = self.robot1.is_arrived()
         last_loc1 = self.robot1.trajectory[self.robot1.traj_idx-1]
         dx1, dy1 = goal_poses[0].x - last_loc1[0], goal_poses[0].y - last_loc1[1]
-        r1 = np.linalg.norm([dx1, dy1])
-        th1 = np.arctan2(dy1, dx1)
 
         ttd2 = self.robot2.ttd
+        success2 = self.robot2.is_arrived()
         last_loc2 = self.robot2.trajectory[self.robot2.traj_idx-1]
         dx2, dy2 = goal_poses[1].x - last_loc2[0], goal_poses[1].y - last_loc2[1]
-        r2 = np.linalg.norm([dx2, dy2])
-        th2 = np.arctan2(dy2, dx2)
 
-        return np.array([[ttd1, r1, th1], [ttd2, r2, th2]])
+        return np.array([[ttd1, dx1, dy1, success1], [ttd2, dx2, dy2, success2]])
 
 class L_Hallway_Single_robot(Gazebo):
     def __init__(self, ep_timeout: float=60.0, debug: str=""):

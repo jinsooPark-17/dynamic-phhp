@@ -61,8 +61,8 @@ if __name__=='__main__':
     if rank==0:
         if not os.path.exists(f"{os.getenv('WORK')}/data"):
             os.makedirs(f"{os.getenv('WORK')}/data")
-        df = pd.DataFrame(recv_arr.reshape(-1,data.shape[-1]), columns=["travel_dist", "ttd", "distance_error", "angle_error"])
-        df.to_csv(f"{os.getenv('WORK')}/data/movebase_precision_result.{os.getenv('SLURM_JOB_ID')}.csv")
+        df = pd.DataFrame(recv_arr.reshape(-1,data.shape[-1]), columns=["travel_dist", "ttd", "dx", "dy", "success"])
+        df.to_csv(f"{os.getenv('WORK')}/data/movebase_precision_result.{os.getenv('SLURM_JOB_ID')}.csv", index=False)
 
         print(f"MoveBase precision experiment result with {size*n_test*2} episodes")
         print(df.mean(axis=0))
