@@ -31,8 +31,8 @@ class Gazebo:
             raise RuntimeError("Gazebo: set_model_state does not respond.")
 
 class I_Shaped_Hallway(Gazebo):
-    def __init__(self, debug: str=""):
-        super().__init__(debug)
+    def __init__(self):
+        super().__init__()
         self.robot1 = AllinOne("marvin")
         self.robot2 = AllinOne("rob")
     

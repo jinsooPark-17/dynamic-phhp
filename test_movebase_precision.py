@@ -10,7 +10,7 @@ from mpi4py import MPI
 
 if __name__=='__main__':
     ID = uuid.uuid4()
-    n_test = 30
+    n_test = 100
 
     # Establish MPI connections first
     comm = MPI.COMM_WORLD

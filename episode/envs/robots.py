@@ -165,7 +165,7 @@ class AllinOne(object):
 
         self.__pub_localize.publish(msg)
 
-    def hallucinate(self):
+    def dynamic_hallucinate(self):
         raise NotImplementedError()
 
     def perceptual_hallucination(self, radius=1.0, dr=0.05, p_min=0.2, p_max=0.8):
