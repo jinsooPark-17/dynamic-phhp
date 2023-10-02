@@ -60,19 +60,27 @@ class I_Shaped_Hallway(Gazebo):
             self.robot1.localize(r1_init.x, r1_init.y, r1_init.yaw)
             self.robot2.localize(r2_init.x, r2_init.y, r2_init.yaw)
             rospy.sleep(0.1)
-        rospy.sleep(2.0)    
+        rospy.sleep(2.0)
 
         # clear costmaps
         self.robot1.clear_costmap()
         self.robot2.clear_costmap()
         rospy.sleep(1.0)
 
-    def test_precision(self, init_poses, goal_poses, timeout: float=30.0):
+    def test_precision(self, init_poses, goal_poses, timeout: float=30.0, debug: str=None):
         # randomize init & goal position
         if np.random.normal() > 0.0:
             init_poses = init_poses[::-1]
             goal_poses = goal_poses[::-1]
         self.reset(init_poses)
+
+        # !!!DEBUG ONLY!!!
+        if debug is not None:
+            from nav_msgs.msg import OccupancyGrid
+            marvin_global = rospy.wait_for_message("/marvin/move_base/global_costmap/costmap", OccupancyGrid)
+            marvin_local = rospy.wait_for_message("/marvin/move_base/local_costmap/costmap", OccupancyGrid)
+            rob_global = rospy.wait_for_message("/rob/move_base/global_costmap/costmap", OccupancyGrid)
+            rob_local = rospy.wait_for_message("/rob/move_base/global_costmap/costmap", OccupancyGrid)
 
         # Assume both robots are vanilla robots
         self.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="vanilla", timeout=timeout)
@@ -96,6 +104,20 @@ class I_Shaped_Hallway(Gazebo):
         success2 = self.robot2.is_arrived()
         last_loc2 = self.robot2.trajectory[self.robot2.traj_idx-1]
         dx2, dy2 = goal_poses[1].x - last_loc2[0], goal_poses[1].y - last_loc2[1]
+
+        if debug is not None:
+            import matplotlib.pyplot as plt
+            if not success1:
+                marvin_global = np.array(marvin_global.data).reshape(marvin_global.info.height, marvin_global.info.width)
+                marvin_local = np.array(marvin_local.data).reshape(marvin_local.info.height, marvin_local.info.width)
+                plt.imsave(f"{debug}-marvin-global.png", marvin_global)
+                plt.imsave(f"{debug}-marvin-local.png", marvin_local)
+
+            if not success2:
+                rob_global = np.array(rob_global.data).reshape(rob_global.info.height, rob_global.info.width)
+                rob_local = np.array(rob_local.data).reshape(rob_local.info.height, rob_local.info.width)
+                plt.imsave(f"{debug}-rob-global.png", rob_global)
+                plt.imsave(f"{debug}-rob-local.png", rob_local)
 
         return np.array([[ttd1, dx1, dy1, success1], [ttd2, dx2, dy2, success2]])
 
