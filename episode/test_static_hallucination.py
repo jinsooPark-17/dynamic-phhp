@@ -15,9 +15,9 @@ if __name__=="__main__":
     # Perform episode
     env = I_Shaped_Hallway()
 
-    d1, d2 = np.random.uniform(low=6.0, high=10.0, size=2)
-    init_poses = [Pose(-10.0   , 0.0, 0.0), Pose(0.0, 0.0, -np.pi)]
-    goal_poses = [Pose(-10.0+d1, 0.0, 0.0), Pose(-d2, 0.0, -np.pi)]
+    d1, d2 = np.random.uniform(low=9.0, high=12.0, size=2)
+    init_poses = [Pose(-12.0   , 0.0, 0.0), Pose(-2.0, 0.0, -np.pi)]
+    goal_poses = [Pose(-12.0+d1, 0.0, 0.0), Pose(-2.0-d2, 0.0, -np.pi)]
 
     # randomize init & goal position
     if np.random.normal() > 0.0:
@@ -28,7 +28,7 @@ if __name__=="__main__":
     env.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="baseline", timeout=60.0, detection_range=9.5, comms_topic="/rob/amcl_pose")
     env.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode="phhp", timeout=60.0, detection_range=6.5, comms_topic="/marvin/amcl_pose")
 
-    while env.robot1.is_running() or env.robot2.is_running():
+    while env.robot1.is_running() + env.robot2.is_running():  # Use True+True=True to make sure both functions are called every loop
         if rospy.is_shutdown():
             raise rospy.ROSInterruptException("ROS shutdown while running episode")
         rospy.sleep(0.1)

@@ -78,7 +78,10 @@ class I_Shaped_Hallway(Gazebo):
         self.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="vanilla", timeout=timeout)
         self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode="vanilla", timeout=timeout)
 
-        while self.robot1.is_running() or self.robot2.is_running():
+        # IMPORTANT!!
+        # Must use arithmetic expression instead of logical expression
+        # to make all functions are called at every loop
+        while (self.robot1.is_running() + self.robot2.is_running()):
             if rospy.is_shutdown():
                 raise rospy.ROSInterruptException("ROS shutdown while running episode")
             rospy.sleep(0.1)

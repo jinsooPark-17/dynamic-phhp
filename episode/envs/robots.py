@@ -50,7 +50,7 @@ class AllinOne(object):
 
         # Define ROS services
         self.__make_plan_srv = rospy.ServiceProxy(
-            os.path.join(self.id, "move_base", "make_plan"),    # "$ID/move_base/NavfnROS/make_plan"
+            os.path.join(self.id, "move_base", "NavfnROS", "make_plan"),    # "$ID/move_base/NavfnROS/make_plan"
             GetPlan
         )
         self.__clear_costmap_srv = rospy.ServiceProxy(
@@ -266,8 +266,11 @@ class AllinOne(object):
             return
 
         # Request current pose of opponent robot
-        comms_msg = rospy.wait_for_message(topic=self.__movebase_args["comms_topic"], topic_type=PoseWithCovarianceStamped, timeout=0.10)
-        comms_pose = np.array([comms_msg.pose.pose.position.x, comms_msg.pose.pose.position.y])
+        try:
+            comms_msg = rospy.wait_for_message(topic=self.__movebase_args["comms_topic"], topic_type=PoseWithCovarianceStamped, timeout=0.10)
+            comms_pose = np.array([comms_msg.pose.pose.position.x, comms_msg.pose.pose.position.y])
+        except rospy.ROSException as e:
+            return
 
         # if opponent robot is facing same direction, ignore
         comms_yaw = quaternion_to_yaw(comms_msg.pose.pose.orientation)
@@ -276,7 +279,8 @@ class AllinOne(object):
 
         # Request plan of robot
         plan_req = GetPlanRequest()
-        plan_req.start = plan_req.goal = self.goal.target_pose
+        plan_req.start.header = self.goal.target_pose.header
+        plan_req.goal = self.goal.target_pose
         plan_req.start.pose = self.pose
         plan_req.tolerance = 0.1
         plan = self.make_plan(plan_req)
