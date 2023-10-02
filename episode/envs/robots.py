@@ -24,7 +24,7 @@ def quaternion_to_yaw(q):
     return yaw
 
 class AllinOne(object):
-    def __init__(self, id: str = "", policy = None, debug: str=""):
+    def __init__(self, id: str = "", policy = None):
         # define variables
         start_time = time.time()
         self.id = id
@@ -42,18 +42,13 @@ class AllinOne(object):
         self.cmd_vel  = torch.zeros(size=(  4,), dtype=torch.float32)
 
         # Connect to ROS MoveBase
-        start_time = time.time()
         self.__move_base = SimpleActionClient(
             os.path.join(self.id, "move_base"),
             MoveBaseAction
         )
-        if debug: print(f"  {debug}: Define move_base took {time.time() - start_time:.3f} sec", flush=True)
-        start_time = time.time()
         self.connected = self.__move_base.wait_for_server(timeout=rospy.Duration(10.0))
-        if debug: print(f"  {debug}: move_base.wait_for_server took {time.time() - start_time:.3f} sec", flush=True)
 
         # Define ROS services
-        start_time = time.time()
         self.__make_plan_srv = rospy.ServiceProxy(
             os.path.join(self.id, "move_base", "make_plan"),    # "$ID/move_base/NavfnROS/make_plan"
             GetPlan
@@ -66,10 +61,8 @@ class AllinOne(object):
             os.path.join(self.id, "clear_virtual_circles"),
             Empty
         )
-        if debug: print(f"  {debug}: Define ros service took {time.time() - start_time:.3f} sec", flush=True)
 
         # Define ROS publisher
-        start_time = time.time()
         self.__pub_localize = rospy.Publisher(
             os.path.join(self.id, "initialpose"),
             PoseWithCovarianceStamped,
@@ -80,10 +73,8 @@ class AllinOne(object):
             PolygonStamped,
             queue_size=10
         )
-        if debug: print(f"  {debug}: Define ROS publisher took {time.time() - start_time:.3f} sec", flush=True)
 
         # Define ROS subscriber
-        start_time = time.time()
         self.__sub_raw_scan = rospy.Subscriber(
             os.path.join(self.id, "scan_filtered"),
             LaserScan, 
@@ -99,7 +90,6 @@ class AllinOne(object):
             Twist,
             self.__cmd_vel_cb
         )
-        if debug: print(f"  {debug}: Define subscriber took {time.time() - start_time:.3f} sec", flush=True)
 
     def __raw_scan_cb(self, msg):
         self.raw_scan = torch.nan_to_num(
@@ -168,30 +158,19 @@ class AllinOne(object):
     def dynamic_hallucinate(self):
         raise NotImplementedError()
 
-    def perceptual_hallucination(self, radius=1.0, dr=0.05, p_min=0.2, p_max=0.8):
-        # Get plan as numpy array
-        plan_req = GetPlanRequest()
-        plan_req.start = plan_req.goal = self.goal.target_pose
-        plan_req.start.pose = self.pose
-        plan_req.tolerance = 0.1
-        plan = self.make_plan(plan_req)
-
-        # calculate location of virtual circles that block left half of plan
-        dist = np.cumsum( np.linalg.norm(plan[1:] - plan[:-1], axis=1) ) # monotonic increasing array
-        d_min = max(dist[-1]*p_min, 1.5)
-        d_max = min(dist[-1]*p_max, dist[-1]-1.5)
-        idx_bgn, idx_end = np.searchsorted(dist, [d_min, d_max])
-
-        dx, dy = (plan[2:] - plan[:-2]).T
-        theta = np.arctan2(dy, dx)[idx_bgn:idx_end:4] + np.pi/2.
-        centers = plan[idx_bgn+1:idx_end+1:4] + (radius + dr) * np.array([np.cos(theta), np.sin(theta)]).T
-
-        msg = PolygonStamped()
-        msg.header.stamp = rospy.Time.now() + rospy.Duration(9999.9)
-        msg.polygon.points = [Point32(x, y, radius) for x, y in centers]
-        self.__pub_hallucination.publish(msg)
-
     def move(self, x: float, y: float, yaw: float, mode: str="vanilla", timeout: float=60.0, **kwargs):
+        """
+        x: x value of goal pose
+        y: y value of goal pose
+        yaw: yaw value of goal pose
+        mode: drive mode of robot. [vanilla, baseline, custom, phhp, dynamic]
+          - vanilla: Apply nothing
+          - baseline: Apply maximun perceptual hallucination
+          - custom: Apply custom perceptual hallucination
+          - phhp: Apply minimum perceptual hallucination
+          - dynamic: Apply dynamic hallucination
+        timeout: set timeout for episode. (default: 60.0 seconds)
+        """
         # Store trajectory from 20hz feedback loop
         self.trajectory = np.zeros(shape=(int(20*(timeout+1)), 3), dtype=np.float32)
         self.traj_idx = 0
@@ -203,22 +182,62 @@ class AllinOne(object):
         self.goal.target_pose.pose.orientation.z = sin(yaw/2.)
         self.goal.target_pose.pose.orientation.w = cos(yaw/2.)
 
+        self.__movebase_args = dict()
         if mode == "vanilla":
-            pass
+            feedback_cb = self.vanilla_feedback_cb
         elif mode == "baseline":
-            self.perceptual_hallucination(radius=0.5, p_min=0.2, p_max=0.8)
-        elif mode == "d-phhp":
+            feedback_cb = self.static_hallucination_feedback_cb
+            try:
+                self.__movebase_args["active"] = False
+                self.__movebase_args["detection_range"] = kwargs["detection_range"]
+                self.__movebase_args["comms_topic"] = kwargs["comms_topic"]
+                self.__movebase_args["radius"]  = 1.0
+                self.__movebase_args["gap"]     = 0.05
+                self.__movebase_args["p_begin"] = 0.0
+                self.__movebase_args["p_end"]   = 1.0
+            except KeyError as e:
+                print("BASELINE mode require [detection_range, comms_topic] arguments!")
+        elif mode == "custom":
+            feedback_cb = self.static_hallucination_feedback_cb
+            try:
+                self.__movebase_args["active"] = False
+                self.__movebase_args["detection_range"] = kwargs["detection_range"]
+                self.__movebase_args["comms_topic"] = kwargs["comms_topic"]
+                self.__movebase_args["radius"]  = kwargs["radius"]
+                self.__movebase_args["gap"]     = kwargs["gap"]
+                self.__movebase_args["p_begin"] = kwargs["p_begin"]
+                self.__movebase_args["p_end"]   = kwargs["p_end"]
+            except KeyError as e:
+                print("CUSTOM mode require [detection_range, comms_topic, radius, gap, p_begin, p_end] arguments!")
+        elif mode == "phhp":
+            feedback_cb = self.static_hallucination_feedback_cb
+            try:
+                self.__movebase_args["active"] = False
+                self.__movebase_args["detection_range"] = kwargs["detection_range"]
+                self.__movebase_args["comms_topic"] = kwargs["comms_topic"]
+                # Configuration for L-shape hallway in Table 1. (https://ieeexplore-ieee-org.ezproxy.lib.utexas.edu/document/10161327) 
+                self.__movebase_args["radius"]  = 0.5122
+                self.__movebase_args["gap"]     = 0.0539
+                self.__movebase_args["p_begin"] = 0.4842
+                self.__movebase_args["p_end"]   = 0.5000
+            except KeyError as e:
+                print("PHHP mode require [detection_range, comms_topic] arguments!")
+        elif mode == "dynamic":
             self.policy.load_state_dict( torch.load(kwargs['network_dir']) )# load policy
+            feedback_cb = self.dynamic_hallucination_feedback_cb
 
         self.ttd = rospy.Time.now()
         self.__move_base.send_goal(
             goal        = self.goal,
-            # active_cb   = None,
-            feedback_cb = self.feedback_cb,
-            # done_cb     = None
+            feedback_cb = feedback_cb,
         )
 
-    def feedback_cb(self, feedback):
+    def vanilla_feedback_cb(self, feedback):
+        # Timeout
+        if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
+            self.stop()
+
+        # Store current pose of robot to trajectory log
         self.pose = feedback.base_position.pose
         self.trajectory[self.traj_idx] = [
             feedback.base_position.pose.position.x,
@@ -227,9 +246,79 @@ class AllinOne(object):
         ]
         self.traj_idx = self.traj_idx + 1
 
+    def static_hallucination_feedback_cb(self, feedback):
         # Timeout
         if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
             self.stop()
+
+        # Store current pose of robot to trajectory log
+        self.pose = feedback.base_position.pose
+        yaw = quaternion_to_yaw(feedback.base_position.pose.orientation)
+        self.trajectory[self.traj_idx] = [
+            feedback.base_position.pose.position.x,
+            feedback.base_position.pose.position.y,
+            yaw
+        ]
+        self.traj_idx = self.traj_idx + 1
+
+        if self.__movebase_args["active"] is True:
+            # Return if static hallucination is already applied.
+            return
+
+        # Request current pose of opponent robot
+        comms_msg = rospy.wait_for_message(topic=self.__movebase_args["comms_topic"], topic_type=PoseWithCovarianceStamped, timeout=0.10)
+        comms_pose = np.array([comms_msg.pose.pose.position.x, comms_msg.pose.pose.position.y])
+
+        # if opponent robot is facing same direction, ignore
+        comms_yaw = quaternion_to_yaw(comms_msg.pose.pose.orientation)
+        if not (0.5*np.pi < np.abs(yaw - comms_yaw) <= 1.5*np.pi):
+            return
+
+        # Request plan of robot
+        plan_req = GetPlanRequest()
+        plan_req.start = plan_req.goal = self.goal.target_pose
+        plan_req.start.pose = self.pose
+        plan_req.tolerance = 0.1
+        plan = self.make_plan(plan_req)
+        dist = np.cumsum( np.linalg.norm(plan[1:] - plan[:-1], axis=1) ) # monotonic increasing array
+
+        # Check if opponent approaches within the detection range
+        proximity = np.linalg.norm(plan[1:] - comms_pose, axis=1)
+        min_idx = np.argmin(proximity)
+        if proximity[min_idx] > 0.35:
+            return
+
+        if dist[min_idx] <= self.__movebase_args["detection_range"]:
+            self.__movebase_args["active"] = True
+            d_min = max(dist[min_idx]*self.__movebase_args["p_begin"], self.__movebase_args["radius"]+0.5)
+            d_max = min(dist[min_idx]*self.__movebase_args["p_end"], dist[-1]-(self.__movebase_args["radius"]+0.5))
+            if d_min > d_max:
+                return
+
+            idx_bgn, idx_end = np.searchsorted(dist, [d_min, d_max])
+
+            dx, dy = (plan[2:] - plan[:-2]).T
+            theta = np.arctan2(dy, dx)[idx_bgn:idx_end:4] + np.pi/2.
+            centers = plan[idx_bgn+1:idx_end+1:4] + np.sign(self.__movebase_args["gap"])*(self.__movebase_args["radius"]+np.abs(self.__movebase_args["gap"])) * np.array([np.cos(theta), np.sin(theta)]).T
+
+            msg = PolygonStamped()
+            msg.header.stamp = rospy.Time.now() + rospy.Duration(9999.9)
+            msg.polygon.points = [Point32(x, y, self.__movebase_args["radius"]) for x, y in centers]
+            self.__pub_hallucination.publish(msg)
+
+    def dynamic_hallucination_feedback_cb(self, feedback):
+        # Timeout
+        if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
+            self.stop()
+
+        # Store current pose of robot to trajectory log
+        self.pose = feedback.base_position.pose
+        self.trajectory[self.traj_idx] = [
+            feedback.base_position.pose.position.x,
+            feedback.base_position.pose.position.y,
+            quaternion_to_yaw(feedback.base_position.pose.orientation)
+        ]
+        self.traj_idx = self.traj_idx + 1
 
     def stop(self):
         self.__move_base.cancel_all_goals()
