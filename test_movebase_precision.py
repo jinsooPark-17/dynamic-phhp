@@ -42,7 +42,7 @@ if __name__=='__main__':
     # Run episode
     storage = f"/tmp/{ID}.result"
     ep_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", 
-                                "python3", "episode/measure_precision.py", storage, f"{n_test}"])
+                                "python3", "episode/measure_precision.py", storage, f"{n_test}"], stderr=subprocess.DEVNULL)
     ep_proc.wait()
     comm.Barrier()
     os.system(f"singularity instance stop {ID} > /dev/null 2>&1")
