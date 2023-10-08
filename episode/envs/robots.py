@@ -155,8 +155,29 @@ class AllinOne(object):
 
         self.__pub_localize.publish(msg)
 
-    def dynamic_hallucinate(self):
-        raise NotImplementedError()
+    def dynamic_hallucinate(self, r, theta, t, radius=0.5):
+        # r, theta, t, radius in [-1.0, 1.0]
+        radius = radius+1.0             # (0.0, 2.0)
+        r      = r*4.0 + 4.5 + radius   # (0.5, 8.5) + radius
+        theta  = theta*np.pi            # (-PI, PI)
+        t      = t*5.0 + 5.0            # (0.0, 10.0)
+
+        # convert relative (r,theta) to global (x,y) coordinate
+        x, y, yaw = self.trajectory[self.traj_idx-1]
+
+        cx = x + r*np.cos(yaw+theta)
+        cy = y + r*np.sin(yaw+theta)
+
+        # DO NOT!! install virtual obstacle if it covers goal point
+        dx = self.goal.target_pose.pose.position.x - cx
+        dy = self.goal.target_pose.pose.position.y - cy
+        if dx*dx + dy*dy < (radius+0.5) * (radius+0.5):     # 0.5 is radius of the robot
+            return
+
+        msg = PolygonStamped()
+        msg.header.stamp = rospy.Time.now() + rospy.Duration(t)
+        msg.polygon.points = [Point32(cx, cy, radius)]
+        self.__pub_hallucination.publish(msg)
 
     def move(self, x: float, y: float, yaw: float, mode: str="vanilla", timeout: float=60.0, **kwargs):
         """
@@ -338,14 +359,15 @@ class AllinOne(object):
         return (self.__move_base.get_state() == GoalStatus.SUCCEEDED)
 
     def get_state(self, ):
-        state = torch.zeros(size=(640*2+2+1,), dtype=torch.float32)
+        state = torch.zeros(size=(1, 640*2+2+1,), dtype=torch.float32)
         # Store scan information
         state[0:640]    = self.raw_scan
         state[640:1280] = self.hal_scan
         # Store velocity message
         state[1280] = self.cmd_vel[0]
+        # state[1281] = self.cmd_vel[2] # Use max v value
         state[1281] = self.cmd_vel[1]
-        # state[1281] = self.cmd_vel[3]
+        # state[1281] = self.cmd_vel[3] # Use max w value
         self.cmd_vel.zero_()
 
         # Store angle to goal

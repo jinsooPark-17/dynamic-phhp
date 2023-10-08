@@ -22,7 +22,7 @@ class Actor(nn.Module):
         self.mu_layer = nn.Linear(256, 3)
         self.log_std_layer = nn.Linear(256, 3)
 
-    def forward(self, x, deterministic=False, with_logprob=True):
+    def forward(self, x, deterministic=False, with_logprob=False):
         scan, features = torch.split(x, 640*self.n_scan, dim=-1)
         scan = scan.view(-1, self.n_scan, 640)
 
@@ -33,7 +33,7 @@ class Actor(nn.Module):
         scan = F.relu( self.conv3(scan) )
 
         # Concatenate scan features with other info
-        x = torch.concat([scan.squeeze(), features], dim=-1)
+        x = torch.concat([scan, features], dim=-1)
         x = F.relu( self.fc1(x) )
         x = F.relu( self.fc2(x) )
 

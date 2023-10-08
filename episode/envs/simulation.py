@@ -1,5 +1,6 @@
 import os
 import time
+import torch
 import numpy as np
 from math import sin, cos
 
@@ -107,6 +108,66 @@ class I_Shaped_Hallway(Gazebo):
         dx2, dy2 = goal_poses[1].x - last_loc2[0], goal_poses[1].y - last_loc2[1]
 
         return np.array([[ttd1, dx1, dy1, success1], [ttd2, dx2, dy2, success2]])
+
+    def run_episode(self, init_poses, goal_poses, opponent: str="vanilla", timeout: float=30.0, 
+                    mode: str="explore", policy=None, cycle: float=1.0):
+        # randomize init & goal position
+        if np.random.normal() > 0.0:
+            init_poses = init_poses[::-1]
+            goal_poses = goal_poses[::-1]
+
+        # Maximum retry attempt: 10
+        for _ in range(10):
+            self.reset(init_poses)
+
+            # Assume both robots are vanilla robots
+            self.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="vanilla", timeout=timeout)
+            if opponent is "custom":
+                radius, gap = 1.0,  np.random.choice([-0.05, 0.05])
+                p_begin, p_end = np.sort(np.random.uniform(0.0, 1.0, 2))
+                self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout,
+                                 radius=radius, gap=gap, p_begin=p_begin, p_end=p_end)
+            else:
+                self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout)
+
+            # Episode MUST be longer than 0.5 seconds
+            rospy.sleep(0.5)
+            if self.robot1.is_running() and self.robot2.is_running():
+                break
+        else:
+            print("Something is wrong even with 10 retry attempt.")
+
+        state = torch.empty(0, 2*640+2+1, dtype=torch.float32)
+        action = torch.empty(0, 3, dtype=torch.float32)
+        reward, done = [], []
+        while self.robot1.is_running() + self.robot2.is_running():
+            if rospy.is_shutdown():
+                raise rospy.ROSInterruptException("ROS shutdown while running episode")
+            # For every t seconds, activate dynamic-PHHP
+            s = self.robot1.get_state()
+            if mode == "explore":
+                a = torch.rand(3) * 2.0 - 1.0
+            elif mode == "exploit":
+                a, _ = policy(s)
+            elif mode == "evaluate":
+                a, _ = policy(s, deterministic=True)
+            self.robot1.dynamic_hallucinate(*a)
+            rospy.sleep(cycle)
+
+            reward += [(10 if self.robot1.is_arrived() else -cycle)]
+            done += [False]
+
+            state = torch.concat([state, s])
+            action = torch.concat([action, a])
+        done[-1] = [True]
+        state = torch.concat([state, self.robot1.get_state()])
+
+        return (state[:-1],     # state
+                action,         # action
+                state[1:],      # next_state
+                torch.tensor(reward, dtype=torch.float32),  # reward
+                torch.tensor(done, dtype=torch.float32)     # done
+        )
 
 class L_Hallway_Single_robot(Gazebo):
     def __init__(self, ep_timeout: float=60.0, debug: str=""):
