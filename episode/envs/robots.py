@@ -92,16 +92,10 @@ class AllinOne(object):
         )
 
     def __raw_scan_cb(self, msg):
-        self.raw_scan = torch.nan_to_num(
-            torch.tensor(msg.ranges, dtype=torch.float32) / (msg.range_max - msg.range_min),
-            nan = 0.0
-        )
+        self.raw_scan = np.array(msg.ranges, np.float32) / (msg.range_max - msg.range_min)
 
     def __hal_scan_cb(self, msg):
-        self.hal_scan = torch.nan_to_num(
-            torch.tensor(msg.ranges, dtype=torch.float32) / (msg.range_max - msg.range_min),
-            nan = 0.0
-        )
+        self.hal_scan = np.array(msg.ranges, np.float32) / (msg.range_max - msg.range_min)
 
     def __cmd_vel_cb(self, msg):
         self.cmd_vel[0] = msg.linear.x
@@ -359,10 +353,10 @@ class AllinOne(object):
         return (self.__move_base.get_state() == GoalStatus.SUCCEEDED)
 
     def get_state(self, ):
-        state = torch.zeros(size=(1, 640*2+2+1,), dtype=torch.float32)
+        state = torch.zeros(size=(640*2+2+1,), dtype=torch.float32)
         # Store scan information
-        state[0:640]    = self.raw_scan
-        state[640:1280] = self.hal_scan
+        state[0:640]    = torch.from_numpy(np.nan_to_num(self.raw_scan, posinf=1.0))
+        state[640:1280] = torch.from_numpy(np.nan_to_num(self.hal_scan, posinf=1.0))
         # Store velocity message
         state[1280] = self.cmd_vel[0]
         # state[1281] = self.cmd_vel[2] # Use max v value
@@ -375,7 +369,7 @@ class AllinOne(object):
         gyaw = atan2( self.goal.target_pose.pose.position.y - y, self.goal.target_pose.pose.position.x - x )
         state[1282] = (gyaw - yaw + np.pi) / (2.*np.pi)
 
-        return state
+        return state.unsqueeze(0)
 
 if __name__ == "__main__":
     # Only use for Debug!

@@ -126,9 +126,11 @@ class I_Shaped_Hallway(Gazebo):
                 radius, gap = 1.0,  np.random.choice([-0.05, 0.05])
                 p_begin, p_end = np.sort(np.random.uniform(0.0, 1.0, 2))
                 self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout,
+                                 comms_topic=f"/{self.robot1.id}/amcl_pose", detection_range=8.0,
                                  radius=radius, gap=gap, p_begin=p_begin, p_end=p_end)
             else:
-                self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout)
+                self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout, 
+                                 comms_topic=f"/{self.robot1.id}/amcl_pose", detection_range=8.0)
 
             # Episode MUST be longer than 0.5 seconds
             rospy.sleep(0.5)
@@ -143,23 +145,27 @@ class I_Shaped_Hallway(Gazebo):
         while self.robot1.is_running() + self.robot2.is_running():
             if rospy.is_shutdown():
                 raise rospy.ROSInterruptException("ROS shutdown while running episode")
-            # For every t seconds, activate dynamic-PHHP
-            s = self.robot1.get_state()
-            if mode == "explore":
-                a = torch.rand(3) * 2.0 - 1.0
-            elif mode == "exploit":
-                a, _ = policy(s)
-            elif mode == "evaluate":
-                a, _ = policy(s, deterministic=True)
-            self.robot1.dynamic_hallucinate(*a)
-            rospy.sleep(cycle)
+            
+            if self.robot1.is_running():
+                # For every t seconds, activate dynamic-PHHP
+                s = self.robot1.get_state()
+                if mode == "explore":
+                    a = torch.rand(1, 3) * 2.0 - 1.0
+                elif mode == "exploit":
+                    with torch.no_grad():
+                        a, _ = policy(s)
+                elif mode == "evaluate":
+                    with torch.no_grad():
+                        a, _ = policy(s, deterministic=True)
+                self.robot1.dynamic_hallucinate(*a.squeeze())
+                rospy.sleep(cycle)
 
-            reward += [(10 if self.robot1.is_arrived() else -cycle)]
-            done += [False]
+                reward += [(10 if self.robot1.is_arrived() else -cycle)]
+                done += [False]
 
-            state = torch.concat([state, s])
-            action = torch.concat([action, a])
-        done[-1] = [True]
+                state = torch.concat([state, s])
+                action = torch.concat([action, a])
+        done[-1] = True
         state = torch.concat([state, self.robot1.get_state()])
 
         return (state[:-1],     # state

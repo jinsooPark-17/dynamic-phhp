@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from math import pi
 import torch
-from torch.distributions.uniform import Uniform
 
 import argparse
 from collections import namedtuple
@@ -13,22 +12,35 @@ Pose = namedtuple("Pose", "x y yaw")
 if __name__=="__main__":
     # Define argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument("storage", type=str, help="data storage directory")
-    parser.add_argument("network_dir", type=str, help="Absolute directory of network")
-    parser.add_argument("opponent", type=str, default="vanilla", help="Opponent robot type: [vanilla, baseline, custom, phhp, dynamic]")
-    parser.add_argument("distance", type=float, default=10.0, help="Distance between two robots")
-    parser.add_argument("frequency", type=float, default=1.0, help="Control frequency of policy")
+    parser.add_argument("--storage", type=str, required=True, help="Absolute path of file where resulting (S, A, S', R, D) is stored.")
+    parser.add_argument("--network", type=torch.load, required=True, help="Absolute path of pyTorch network file.")
+    parser.add_argument("--mode", type=str, choice=["explore", "exploit", "eval"], required=True)
+    parser.add_argument("--opponent", type=str, choices=['vanilla', 'baseline', 'custom', 'phhp', 'dynamic'], required=True, help="Choose opponent behavior")
+    parser.add_argument("--init_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
+    parser.add_argument("--goal_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
+    parser.add_argument("--timeout", type=float, default=60.0, help="Set timeout for episode (default: 60.0s)")
+    parser.add_argument("--hz", type=float, default=1.0, help="Set frequency of RL-policy (default: 1.0/s)")
     args = parser.parse_args()
 
-    # Perform episode
-    env = I_Shaped_Hallway()
-    control_pi = Actor(n_scan=2)
-    control_pi.load_state_dict( torch.load(args.network_dir) )
+    # assign default values to init_poses and goal_poses
+    if args.init_poses == args.goal_poses == None:
+        args.init_poses = [[-12.0, 0.0, 0.0], [-2.0, 0.0, pi]]
+        args.goal_poses = [[-2.0, 0.0, 0.0], [-12.0, 0.0, pi]]
+    assert len(args.init_poses) == len(args.goal_poses) == 2
 
-    # d = Uniform(low=4.0, high=12.0).sample().tolist()
-    init_poses = [Pose(-12.0, 0.0, 0.0), Pose( -2.0, 0.0, -pi)]
-    goal_poses = [Pose( -2.0, 0.0, 0.0), Pose(-12.0, 0.0, -pi)]
-    s1, a, s2, r, d = env.run_episode(init_poses, goal_poses, args.opponent, timeout=60.0, 
-                                      mode="explore", policy=control_pi, cycle = 0.8)
+    # Run episode
+    env = I_Shaped_Hallway()
+    model = Actor(n_scan=2)
+    model.load_state_dict(args.network)
+    s1, a, s2, r, d = env.run_episode(
+        init_poses=args.init_poses, goal_poses=args.goal_poses, opponent=args.opponent, timeout=args.timeout,
+        mode=args.mode, policy=model, cycle=args.hz
+    )
 
     torch.save(dict(state=s1, action=a, next_state=s2, reward=r, done=d), args.storage)
+
+# SAMPLE
+# python3 train_episode.py --storage /tmp/$UUID --network $WORK/NETWORK --mode explore --opponent baseline \
+#                          --init_poses -12.0 0.0 0.0     --goal_poses -2.0 0.0 0.0 \
+#                          --init_poses -2.0 0.0 3.141592 --goal_poses -12.0 0.0 3.141592
+#                          --timeout 60.0 --hz 0.8
