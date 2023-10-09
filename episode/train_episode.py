@@ -14,7 +14,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--storage", type=str, required=True, help="Absolute path of file where resulting (S, A, S', R, D) is stored.")
     parser.add_argument("--network", type=torch.load, required=True, help="Absolute path of pyTorch network file.")
-    parser.add_argument("--mode", type=str, choice=["explore", "exploit", "eval"], required=True)
+    parser.add_argument("--mode", type=str, choices=["explore", "exploit", "eval"], required=True)
     parser.add_argument("--opponent", type=str, choices=['vanilla', 'baseline', 'custom', 'phhp', 'dynamic'], required=True, help="Choose opponent behavior")
     parser.add_argument("--init_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
     parser.add_argument("--goal_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
@@ -24,8 +24,11 @@ if __name__=="__main__":
 
     # assign default values to init_poses and goal_poses
     if args.init_poses == args.goal_poses == None:
-        args.init_poses = [[-12.0, 0.0, 0.0], [-2.0, 0.0, pi]]
-        args.goal_poses = [[-2.0, 0.0, 0.0], [-12.0, 0.0, pi]]
+        args.init_poses = [Pose(-12.0, 0.0, 0.0), Pose(-2.0, 0.0, pi)]
+        args.goal_poses = [Pose(-2.0, 0.0, 0.0), Pose(-12.0, 0.0, pi)]
+    else:
+        args.init_poses = [Pose(*p) for p in args.init_poses]
+        args.goal_poses = [Pose(*p) for p in args.goal_poses]
     assert len(args.init_poses) == len(args.goal_poses) == 2
 
     # Run episode
@@ -38,9 +41,3 @@ if __name__=="__main__":
     )
 
     torch.save(dict(state=s1, action=a, next_state=s2, reward=r, done=d), args.storage)
-
-# SAMPLE
-# python3 train_episode.py --storage /tmp/$UUID --network $WORK/NETWORK --mode explore --opponent baseline \
-#                          --init_poses -12.0 0.0 0.0     --goal_poses -2.0 0.0 0.0 \
-#                          --init_poses -2.0 0.0 3.141592 --goal_poses -12.0 0.0 3.141592
-#                          --timeout 60.0 --hz 0.8
