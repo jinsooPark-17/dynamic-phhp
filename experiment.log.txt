@@ -1,0 +1,15 @@
+Experiment #1 Policy syncronize
+
+N  1 n   24
+    bcast       took 0.15 seconds
+    network dir took 0.08 seconds
+
+N  5 n  120
+    bcast       took 0.20 seconds
+    network dir took 0.15 seconds
+
+N 50 n 1200
+    bcast       took ?.?? seconds
+    network dir took ?.?? seconds
+
+Looks like bcast is faster when using large number of NODES

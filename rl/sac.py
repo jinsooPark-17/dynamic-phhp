@@ -4,7 +4,6 @@ import itertools
 import numpy as np
 import torch
 from torch.optim import Adam
-from tensorboardX import SummaryWriter
 
 class ReplayBuffer:
     def __init__(self, obs_dim, act_dim, size):
@@ -66,7 +65,6 @@ class SAC:
         self.gamma = gamma
         self.polyak = polyak
         self.alpha = alpha
-        self.logger = SummaryWriter(log_dir)
 
         # Freeze target network
         for p in self.ac_targ.parameters():
@@ -144,9 +142,7 @@ class SAC:
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1.-self.polyak)*p.data)
         
-        # Record Loss_Q and Loss_PI
-        self.logger.add_scalar("Loss_Q", loss_q)
-        self.logger.add_scalar("Loss_P", loss_pi)
+        return loss_q, loss_pi
 
     def save(self, network_dir):
         torch.save(self.ac.pi.state_dict(), os.path.join(network_dir, "pi"))
@@ -154,7 +150,7 @@ class SAC:
         torch.save(self.ac.q2.state_dict(), os.path.join(network_dir, "q2"))
         torch.save(self.pi_optim.state_dict(), os.path.join(network_dir, "pi_optimizer"))
         torch.save(self.q_optim.state_dict(),  os.path.join(network_dir, "q_optimizer"))
-    
+
     def checkpoint(self, epoch, checkpoint_dir):
         torch.save(
             {
