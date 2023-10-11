@@ -29,7 +29,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_freq", type=int, default=1)
     parser.add_argument("--policy_hz", type=float, default=1.0)
     parser.add_argument("--act_dim", type=int, choices=[3,4], default=3)
-    parser.add_argument("--opponents", type='str', choices=["vanilla", "baseline", "custom", "phhp"], action='append')
+    parser.add_argument("--opponents", type=str, choices=["vanilla", "baseline", "custom", "phhp"], action='append')
     args = parser.parse_args()
 
     # Initialize MPI
@@ -42,24 +42,23 @@ if __name__ == "__main__":
     local_rank = int(os.getenv('MPI_LOCALRANKID') or os.getenv('MV2_COMM_WORLD_LOCAL_RANK'))
 
     # Share policy
-    model = (ActorCritic( n_scan=2, n_act=args.act_dim ) if rank == 0 else None)
-    model = comm.bcast(model, root=0)   # Synchronize
     replay = ReplayBuffer(obs_dim=640*2+3, act_dim=args.act_dim, size=int(args.replay_size/size+1))
-    sac = SAC(actor_critic=model, gamma=args.gamma, polyak=args.polyak, lr=args.lr, alpha=args.alpha)
-
+    sac = SAC(actor_critic=ActorCritic( n_scan=2, n_act=args.act_dim ), 
+              gamma=args.gamma, polyak=args.polyak, lr=args.lr, alpha=args.alpha)
+    sac = comm.bcast(sac, root=0)
     LOCAL_BATCH_SIZE = (args.batch_size // size + 1)
     LOCAL_TEST_EPISODES = (args.num_test_episodes // size + 1)
 
     ####################################################################
     X = (torch.rand(1, 640*2+3) if rank == 0 else None)
     X = comm.bcast(X, root=0)
-    Y = model.act(X, deterministic=True)
-    recv_buf = (torch.rand_like(size, *Y.size()) if rank == 0 else None)
+    Y = sac.ac.act(X, deterministic=True).squeeze()
+    recv_buf = (torch.empty((size, *Y.shape)) if rank == 0 else None)
     comm.Gather(Y, recv_buf, root=0)
     if rank==0:
         y_min = recv_buf.min(axis=0)
         y_max = recv_buf.max(axis=0)
-        print(f"Synchronized policy result: {y_min} ~ {y_min}\nDifference: {y_max-y_min}")
+        print(f"Synchronized policy result: {y_min.values} ~ {y_min.values}\nDifference: {y_max.values-y_min.values}", flush=True)
     ####################################################################
 
     # Initiate ROS-Gazebo simulation
@@ -82,9 +81,10 @@ if __name__ == "__main__":
     for epoch in range(args.epochs):
         t = 0
         while t < args.steps_per_epoch:
+            print(f"Continue with {total_steps}", flush=True)
             # Save current policy in **local** /tmp directory
             if local_rank == 0:
-                torch.save( model.ac.pi.state_dict(), "/tmp/model.pt" )
+                torch.save( sac.ac.pi.state_dict(), "/tmp/model.pt" )
             comm.Barrier()
             # Run episode to collect data
             mode = ("explore" if total_steps < args.explore_steps else "exploit")
@@ -102,28 +102,34 @@ if __name__ == "__main__":
                 "--storage", f"/tmp/{ID}.pt", "--network", "/tmp/model.pt", "--mode", mode, "--opponent", opponent,
                 "--init_poses", f"{x1}", f"{y1}", f"{yaw1}", "--goal_poses", f"{gx1}", f"{gy1}", f"{gyaw1}",
                 "--init_poses", f"{x2}", f"{y2}", f"{yaw1}", "--goal_poses", f"{gx2}", f"{gy2}", f"{gyaw2}",
-                "--timeout", "60.0", "--hz", args.policy_hz], stderr=subprocess.DEVNULL)
+                "--timeout", "60.0", "--hz", f"{args.policy_hz}"], stderr=subprocess.DEVNULL)
             ep_proc.wait()
 
             # Read episode result from file
             data = torch.load(f"/tmp/{ID}.pt")
             s, a, ns, r, d = list(map(data.get, ["state", "action", "next_state", "reward", "done"]))
+            print(s)
+            print(a)
+            print(ns)
+            print(r)
+            print(d)
             ep_len = replay.store(state=s, action=a, next_state=ns, reward=r, done=d)
 
             ep_steps = comm.allreduce( ep_len, op=MPI.SUM )
             if total_steps > args.update_after:
                 for step in range(ep_steps):
+                    print(replay.sample_batch(LOCAL_BATCH_SIZE))
                     loss_q, loss_pi = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
                     ####################################################################
                     X = (torch.rand(1, 640*2+3) if rank == 0 else None)
                     X = comm.bcast(X, root=0)
-                    Y = model.act(X, deterministic=True)
-                    recv_buf = (torch.rand_like(size, *Y.size()) if rank == 0 else None)
+                    Y = sac.ac.act(X, deterministic=True).squeeze()
+                    recv_buf = (torch.empty((size, *Y.shape)) if rank == 0 else None)
                     comm.Gather(Y, recv_buf, root=0)
                     if rank==0:
                         y_min = recv_buf.min(axis=0)
                         y_max = recv_buf.max(axis=0)
-                        print(f"{total_steps+step}\tSynchronized policy result: {y_min} ~ {y_min}\nDifference: {y_max-y_min}")
+                        print(f"Synchronized policy result: {y_min.values} ~ {y_min.values}\nDifference: {y_max.values-y_min.values}", flush=True)
                     ####################################################################
             total_steps += ep_steps
         # Perform test episode

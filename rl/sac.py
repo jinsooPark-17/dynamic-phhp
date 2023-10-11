@@ -44,7 +44,6 @@ class ReplayBuffer:
 
     def sample_batch(self, batch_size=256):
         idxs = np.random.randint(0, self.size, size=batch_size)
-        print(idxs)
         batch = dict(
             obs1 = torch.as_tensor(self.obs1[idxs]),
             obs2 = torch.as_tensor(self.obs2[idxs]),
