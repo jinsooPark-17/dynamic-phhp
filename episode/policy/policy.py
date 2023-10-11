@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 LOG2 = 0.6931471805599453
 class Actor(nn.Module):
-    def __init__(self, n_scan):
+    def __init__(self, n_scan, n_act=3):
         super().__init__()
 
         # Store info
@@ -16,11 +16,11 @@ class Actor(nn.Module):
         self.conv2 = nn.Conv1d(32, 32, 3, 2, 1, dtype=torch.float32)
         self.conv3 = nn.Linear(32*160, 256, dtype=torch.float32)
 
-        self.fc1 = nn.Linear(256 + 2 + 1, 256)
+        self.fc1 = nn.Linear(256 + 3, 256)
         self.fc2 = nn.Linear(256, 256)
 
-        self.mu_layer = nn.Linear(256, 3)
-        self.log_std_layer = nn.Linear(256, 3)
+        self.mu_layer = nn.Linear(256, n_act)
+        self.log_std_layer = nn.Linear(256, n_act)
 
     def forward(self, x, deterministic=False, with_logprob=False):
         scan, features = torch.split(x, 640*self.n_scan, dim=-1)
@@ -61,7 +61,7 @@ class Actor(nn.Module):
         return action, logp
     
 class QFunction(nn.Module):
-    def __init__(self, n_scan=1):
+    def __init__(self, n_scan, n_act=3):
         super().__init__()
         self.n_scan = n_scan
 
@@ -70,7 +70,7 @@ class QFunction(nn.Module):
         self.conv2 = nn.Conv1d(32, 32, 3, 2, 1, dtype=torch.float32)
         self.conv3 = nn.Linear(32*160, 256, dtype=torch.float32)
 
-        self.fc1 = nn.Linear(256 + 2 + 1, 256)
+        self.fc1 = nn.Linear(256 + 3 + n_act, 256)
         self.fc2 = nn.Linear(256, 256)
 
         self.fc3 = nn.Linear(256, 1)
@@ -94,12 +94,12 @@ class QFunction(nn.Module):
         return torch.squeeze(q, -1)
     
 class ActorCritic(nn.Module):
-    def __init__(self, n_scan):
+    def __init__(self, n_scan, n_act=3):
         super().__init__()
 
-        self.pi = Actor(n_scan)
-        self.q1 = QFunction(n_scan)
-        self.q2 = QFunction(n_scan)
+        self.pi = Actor(n_scan, n_act)
+        self.q1 = QFunction(n_scan, n_act)
+        self.q2 = QFunction(n_scan, n_act)
 
     def act(self, obs, deterministic=False):
         with torch.no_grad():

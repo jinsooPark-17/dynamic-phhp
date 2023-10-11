@@ -15,30 +15,28 @@ class ReplayBuffer:
 
         self.ptr, self.size, self.max_size = 0, 0, size
 
-    def store(self, filename):
-        """ Load episode data from cvs file """
-        data = np.load(filename)
-        ep_len = data['done'].shape[0]
-
+    def store(self, state, action, next_state, reward, done):
+        assert state.size(0) == action.size(0) == next_state.size(0) == reward.size(0) == done.size(0)
+        ep_len = state.size(0)
         if (self.ptr+ep_len) > self.max_size:
             exceed = self.max_size - (self.ptr + ep_len)    # negative value
-            self.obs1[self.ptr:] = data["obs1"][:exceed]
-            self.obs2[self.ptr:] = data["obs2"][:exceed]
-            self.act[self.ptr:]  = data["action"][:exceed]
-            self.rew[self.ptr:]  = data["reward"][:exceed]
-            self.done[self.ptr:] = data["done"][:exceed]
+            self.obs1[self.ptr:] = state[:exceed]
+            self.obs2[self.ptr:] = next_state[:exceed]
+            self.act[self.ptr:]  = action[:exceed]
+            self.rew[self.ptr:]  = reward[:exceed]
+            self.done[self.ptr:] = done[:exceed]
 
-            self.obs1[:-exceed] = data["obs1"][exceed:]
-            self.obs2[:-exceed] = data["obs2"][exceed:]
-            self.act[:-exceed]  = data["action"][exceed:]
-            self.rew[:-exceed]  = data["reward"][exceed:]
-            self.done[:-exceed] = data["done"][exceed:]
+            self.obs1[:-exceed] = state[exceed:]
+            self.obs2[:-exceed] = next_state[exceed:]
+            self.act[:-exceed]  = action[exceed:]
+            self.rew[:-exceed]  = reward[exceed:]
+            self.done[:-exceed] = done[exceed:]
         else:
-            self.obs1[self.ptr:self.ptr+ep_len] = data["obs1"]
-            self.obs2[self.ptr:self.ptr+ep_len] = data["obs2"]
-            self.act[self.ptr:self.ptr+ep_len]  = data["action"]
-            self.rew[self.ptr:self.ptr+ep_len]  = data["reward"]
-            self.done[self.ptr:self.ptr+ep_len] = data["done"]
+            self.obs1[self.ptr:self.ptr+ep_len] = state
+            self.obs2[self.ptr:self.ptr+ep_len] = next_state
+            self.act[self.ptr:self.ptr+ep_len]  = action
+            self.rew[self.ptr:self.ptr+ep_len]  = reward
+            self.done[self.ptr:self.ptr+ep_len] = done
 
         self.ptr = (self.ptr+ep_len) % self.max_size
         self.size = min(self.size+ep_len, self.max_size)
@@ -58,7 +56,7 @@ class ReplayBuffer:
         return batch
     
 class SAC:
-    def __init__(self, actor_critic, gamma=0.99, polyak=0.995, lr=1e-3, alpha=0.2, log_dir=""):
+    def __init__(self, actor_critic, gamma=0.99, polyak=0.995, lr=1e-3, alpha=0.2):
         self.ac = actor_critic
         self.ac_targ = deepcopy(self.ac)
 
@@ -130,6 +128,47 @@ class SAC:
         self.pi_optim.zero_grad()
         loss_pi, pi_info = self.compute_loss_pi(batch)
         loss_pi.backward()
+        self.pi_optim.step()
+
+        # Unfreeze Q-network
+        for p in self.q_params:
+            p.require_grad = True
+
+        # Update target network by polyak averaging
+        with torch.no_grad():
+            for p, p_targ in zip(self.ac.parameters(), self.ac_targ.parameters()):
+                p_targ.data.mul_(self.polyak)
+                p_targ.data.add_((1.-self.polyak)*p.data)
+        
+        return loss_q, loss_pi
+
+    def update_mpi(self, batch, comm):
+        # Update Q1 and Q2
+        self.q_optim.zero_grad()
+        loss_q, q_info = self.compute_loss_q( batch )
+        loss_q.backward()
+
+        # Average gradient across MPI jobs
+        for p in self.q_params.parameters():
+            p_grad_numpy = p.grad.numpy()
+            avg_p_grad = comm.allreduce(p.grad) / comm.Get_size()
+            p_grad_numpy[:] = avg_p_grad[:]
+        self.q_optim.step()
+
+        # Freeze Q-network
+        for p in self.q_params:
+            p.require_grad = False
+
+        # Update PI
+        self.pi_optim.zero_grad()
+        loss_pi, pi_info = self.compute_loss_pi(batch)
+        loss_pi.backward()
+
+        # Average gradient across MPI jobs
+        for p in self.ac.pi.parameters():
+            p_grad_numpy = p.grad.numpy()
+            avg_p_grad = comm.allreduce(p.grad) / comm.Get_size()
+            p_grad_numpy[:] = avg_p_grad[:]
         self.pi_optim.step()
 
         # Unfreeze Q-network
