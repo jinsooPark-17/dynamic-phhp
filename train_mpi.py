@@ -1,4 +1,5 @@
 import os
+import gc
 import time
 import uuid
 import torch
@@ -43,23 +44,13 @@ if __name__ == "__main__":
 
     # Share policy
     replay = ReplayBuffer(obs_dim=640*2+3, act_dim=args.act_dim, size=int(args.replay_size/size+1))
-    sac = SAC(actor_critic=ActorCritic( n_scan=2, n_act=args.act_dim ), 
-              gamma=args.gamma, polyak=args.polyak, lr=args.lr, alpha=args.alpha)
-    sac = comm.bcast(sac, root=0)
+    if rank == 0:
+        sac = SAC(actor_critic=ActorCritic( n_scan=2, n_act=args.act_dim ), 
+                gamma=args.gamma, polyak=args.polyak, lr=args.lr, alpha=args.alpha)
+    else:
+        sac = None
     LOCAL_BATCH_SIZE = (args.batch_size // size + 1)
     LOCAL_TEST_EPISODES = (args.num_test_episodes // size + 1)
-
-    ####################################################################
-    X = (torch.rand(1, 640*2+3) if rank == 0 else None)
-    X = comm.bcast(X, root=0)
-    Y = sac.ac.act(X, deterministic=True).squeeze()
-    recv_buf = (torch.empty((size, *Y.shape)) if rank == 0 else None)
-    comm.Gather(Y, recv_buf, root=0)
-    if rank==0:
-        y_min = recv_buf.min(axis=0)
-        y_max = recv_buf.max(axis=0)
-        print(f"Synchronized policy result: {y_min.values} ~ {y_min.values}\nDifference: {y_max.values-y_min.values}", flush=True)
-    ####################################################################
 
     # Initiate ROS-Gazebo simulation
     for n_restart in range(10): # Max restart 10 times
@@ -81,7 +72,6 @@ if __name__ == "__main__":
     for epoch in range(args.epochs):
         t = 0
         while t < args.steps_per_epoch:
-            print(f"Continue with {total_steps}", flush=True)
             # Save current policy in **local** /tmp directory
             if local_rank == 0:
                 torch.save( sac.ac.pi.state_dict(), "/tmp/model.pt" )
@@ -108,15 +98,11 @@ if __name__ == "__main__":
             # Read episode result from file
             data = torch.load(f"/tmp/{ID}.pt")
             s, a, ns, r, d = list(map(data.get, ["state", "action", "next_state", "reward", "done"]))
-            print(s)
-            print(a)
-            print(ns)
-            print(r)
-            print(d)
             ep_len = replay.store(state=s, action=a, next_state=ns, reward=r, done=d)
 
             ep_steps = comm.allreduce( ep_len, op=MPI.SUM )
             if total_steps > args.update_after:
+                sac = comm.bcast(sac, root=0)
                 for step in range(ep_steps):
                     print(replay.sample_batch(LOCAL_BATCH_SIZE))
                     loss_q, loss_pi = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
@@ -126,11 +112,17 @@ if __name__ == "__main__":
                     Y = sac.ac.act(X, deterministic=True).squeeze()
                     recv_buf = (torch.empty((size, *Y.shape)) if rank == 0 else None)
                     comm.Gather(Y, recv_buf, root=0)
-                    if rank==0:
+                    if rank==0: 
                         y_min = recv_buf.min(axis=0)
                         y_max = recv_buf.max(axis=0)
-                        print(f"Synchronized policy result: {y_min.values} ~ {y_min.values}\nDifference: {y_max.values-y_min.values}", flush=True)
+                        if torch.count_nonzero(y_max.values - y_min.values) != 0:
+                            print(f"!!!Policy sync failed!!!\n\t{y_min.values} ~ {y_min.values}", flush=True)
                     ####################################################################
+                if rank != 0:
+                    del(sac)
+                    gc.collect()
+                    sac = None
+            t+= ep_steps
             total_steps += ep_steps
         # Perform test episode
         # for _ in range(LOCAL_TEST_EPISODES):

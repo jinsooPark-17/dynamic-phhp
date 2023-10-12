@@ -81,7 +81,7 @@ class SAC:
 
         # Bellman backup for Q functions
         with torch.no_grad():
-            a2, logp_a2 = self.ac.pi(o2)
+            a2, logp_a2 = self.ac.pi(o2, with_logprob=True)
 
             # Target Q-value
             q1_pi_targ = self.ac_targ.q1(o2, a2)
@@ -100,7 +100,7 @@ class SAC:
     
     def compute_loss_pi(self, batch):
         o = batch['obs1']
-        pi, logp_pi = self.ac.pi(o)
+        pi, logp_pi = self.ac.pi(o, with_logprob=True)
         q1_pi = self.ac.q1(o, pi)
         q2_pi = self.ac.q2(o, pi)
         q_pi = torch.min(q1_pi, q2_pi)
@@ -148,7 +148,7 @@ class SAC:
         loss_q.backward()
 
         # Average gradient across MPI jobs
-        for p in self.q_params.parameters():
+        for p in self.q_params:
             p_grad_numpy = p.grad.numpy()
             avg_p_grad = comm.allreduce(p.grad) / comm.Get_size()
             p_grad_numpy[:] = avg_p_grad[:]
