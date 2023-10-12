@@ -41,6 +41,8 @@ if __name__ == "__main__":
     size       = comm.Get_size()
     rank       = comm.Get_rank()
     local_rank = int(os.getenv('MPI_LOCALRANKID') or os.getenv('MV2_COMM_WORLD_LOCAL_RANK'))
+    LOCAL_BATCH_SIZE = (args.batch_size // size + 1)
+    LOCAL_TEST_EPISODES = (args.num_test_episodes // size + 1)
 
     # Share policy
     replay = ReplayBuffer(obs_dim=640*2+3, act_dim=args.act_dim, size=int(args.replay_size/size+1))
@@ -49,8 +51,8 @@ if __name__ == "__main__":
                 gamma=args.gamma, polyak=args.polyak, lr=args.lr, alpha=args.alpha)
     else:
         sac = None
-    LOCAL_BATCH_SIZE = (args.batch_size // size + 1)
-    LOCAL_TEST_EPISODES = (args.num_test_episodes // size + 1)
+    sac = comm.bcast(sac, root=0)
+
 
     # Initiate ROS-Gazebo simulation
     for n_restart in range(10): # Max restart 10 times
@@ -87,6 +89,7 @@ if __name__ == "__main__":
             x2, y2, yaw2 = -2.0, random.uniform(-0.5, 0.5), random.uniform(-pi/4., pi/4.) + pi
             gx2, gy2, gyaw2 = -12.0, 0.0, pi
 
+            time.sleep(local_rank/24.0)
             ep_proc = subprocess.Popen([
                 "singularity", "run", f"instance://{ID}", "python3", "episode/train_episode.py",
                 "--storage", f"/tmp/{ID}.pt", "--network", "/tmp/model.pt", "--mode", mode, "--opponent", opponent,
@@ -94,6 +97,8 @@ if __name__ == "__main__":
                 "--init_poses", f"{x2}", f"{y2}", f"{yaw1}", "--goal_poses", f"{gx2}", f"{gy2}", f"{gyaw2}",
                 "--timeout", "60.0", "--hz", f"{args.policy_hz}"], stderr=subprocess.DEVNULL)
             ep_proc.wait()
+            del ep_proc
+            gc.collect()
 
             # Read episode result from file
             data = torch.load(f"/tmp/{ID}.pt")
@@ -102,7 +107,6 @@ if __name__ == "__main__":
 
             ep_steps = comm.allreduce( ep_len, op=MPI.SUM )
             if total_steps > args.update_after:
-                sac = comm.bcast(sac, root=0)
                 for step in range(ep_steps):
                     print(replay.sample_batch(LOCAL_BATCH_SIZE))
                     loss_q, loss_pi = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
@@ -118,10 +122,6 @@ if __name__ == "__main__":
                         if torch.count_nonzero(y_max.values - y_min.values) != 0:
                             print(f"!!!Policy sync failed!!!\n\t{y_min.values} ~ {y_min.values}", flush=True)
                     ####################################################################
-                if rank != 0:
-                    del(sac)
-                    gc.collect()
-                    sac = None
             t+= ep_steps
             total_steps += ep_steps
         # Perform test episode
