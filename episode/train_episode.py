@@ -37,7 +37,13 @@ if __name__=="__main__":
     model.load_state_dict(args.network)
     s1, a, s2, r, d = env.run_episode(
         init_poses=args.init_poses, goal_poses=args.goal_poses, opponent=args.opponent, timeout=args.timeout,
-        mode=args.mode, policy=model, cycle=args.hz
+        mode=args.mode, policy=model, cycle=args.hz, shuffle=(False if args.mode=='eval' else True)
     )
-
-    torch.save(dict(state=s1, action=a, next_state=s2, reward=r, done=d), args.storage)
+    torch.save(
+        dict(state=s1, 
+             action=a, 
+             next_state=s2, 
+             reward=r, 
+             done=d, 
+             trajectory1=torch.from_numpy(env.robot1.trajectory), 
+             trajectory2=torch.from_numpy(env.robot2.trajectory)), args.storage)

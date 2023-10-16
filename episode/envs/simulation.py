@@ -110,9 +110,9 @@ class I_Shaped_Hallway(Gazebo):
         return np.array([[ttd1, dx1, dy1, success1], [ttd2, dx2, dy2, success2]])
 
     def run_episode(self, init_poses, goal_poses, opponent: str="vanilla", timeout: float=30.0, 
-                    mode: str="explore", policy=None, cycle: float=1.0):
+                    mode: str="explore", policy=None, cycle: float=1.0, shuffle=True):
         # randomize init & goal position
-        if np.random.normal() > 0.0:
+        if shuffle and np.random.normal() > 0.0:
             init_poses = init_poses[::-1]
             goal_poses = goal_poses[::-1]
 

@@ -94,7 +94,7 @@ class SAC:
         loss_q2 = ((q2 - backup)**2).mean()
         loss_q = loss_q1 + loss_q2
 
-        q_info = dict(Q1=q1.detach().numpy(), Q2=q2.detach().numpy())
+        q_info = dict(LossQ=loss_q.detach().numpy(), Q1=q1.detach().numpy(), Q2=q2.detach().numpy())
 
         return loss_q, q_info
     
@@ -108,7 +108,7 @@ class SAC:
         # Entropy-regularized policy loss
         loss_pi = (self.alpha*logp_pi - q_pi).mean()
 
-        p_info = dict(LogPi=logp_pi.detach().numpy())
+        p_info = dict(LossPi=loss_pi.detach().numpy(), LogPi=logp_pi.detach().numpy())
 
         return loss_pi, p_info
     
@@ -180,7 +180,7 @@ class SAC:
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1.-self.polyak)*p.data)
         
-        return loss_q, loss_pi
+        return q_info, pi_info
 
     def save(self, network_dir):
         torch.save(self.ac.pi.state_dict(), os.path.join(network_dir, "pi"))
