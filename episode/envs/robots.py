@@ -26,7 +26,6 @@ def quaternion_to_yaw(q):
 class AllinOne(object):
     def __init__(self, id: str = "", policy = None):
         # define variables
-        start_time = time.time()
         self.id = id
         self.policy = policy
 
@@ -35,6 +34,8 @@ class AllinOne(object):
         self.pose = PoseWithCovarianceStamped().pose.pose   # Pose() msg
         self.trajectory = np.zeros(shape=(0,3), dtype=np.float32)
         self.traj_idx: int = 0
+        self.__next_install = None
+        self.__cycle = None
 
         # Define data storage
         self.raw_scan = torch.zeros(size=(640,), dtype=torch.float32)
@@ -238,7 +239,9 @@ class AllinOne(object):
             except KeyError as e:
                 print("PHHP mode require [detection_range, comms_topic] arguments!")
         elif mode == "dynamic":
-            self.policy.load_state_dict( torch.load(kwargs['network_dir']) )# load policy
+            self.policy = kwargs['policy']
+            self.__cycle = kwargs['cycle']
+            self.__next_install = rospy.Time.now() + rospy.Duration(self.__cycle)
             feedback_cb = self.dynamic_hallucination_feedback_cb
 
         self.ttd = rospy.Time.now()
@@ -339,6 +342,14 @@ class AllinOne(object):
         ]
         self.traj_idx = self.traj_idx + 1
 
+        now = rospy.Time.now()
+        if now > self.__next_install:
+            self.__next_install = now + rospy.Duration(self.__cycle)
+            s = self.get_state()
+            with torch.no_grad():
+                a, _ = self.policy(s, deterministic=True)
+            self.dynamic_hallucinate(*a.squeeze())
+
     def stop(self):
         self.__move_base.cancel_all_goals()
 
@@ -370,6 +381,9 @@ class AllinOne(object):
         state[1282] = (gyaw - yaw + np.pi) / (2.*np.pi)
 
         return state.unsqueeze(0)
+
+    def get_trajectory(self):
+        return self.trajectory[:self.traj_idx]
 
 if __name__ == "__main__":
     # Only use for Debug!

@@ -14,7 +14,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--storage", type=str, required=True, help="Absolute path of file where resulting (S, A, S', R, D) is stored.")
     parser.add_argument("--network", type=torch.load, required=True, help="Absolute path of pyTorch network file.")
-    parser.add_argument("--mode", type=str, choices=["explore", "exploit", "eval"], required=True)
+    parser.add_argument("--mode", type=str, choices=["explore", "exploit", "evaluate"], required=True)
     parser.add_argument("--opponent", type=str, choices=['vanilla', 'baseline', 'custom', 'phhp', 'dynamic'], required=True, help="Choose opponent behavior")
     parser.add_argument("--init_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
     parser.add_argument("--goal_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
@@ -37,13 +37,9 @@ if __name__=="__main__":
     model.load_state_dict(args.network)
     s1, a, s2, r, d = env.run_episode(
         init_poses=args.init_poses, goal_poses=args.goal_poses, opponent=args.opponent, timeout=args.timeout,
-        mode=args.mode, policy=model, cycle=args.hz, shuffle=(False if args.mode=='eval' else True)
+        mode=args.mode, policy=model, cycle=args.hz, shuffle=(False if args.mode=='evaluate' else True)
     )
-    torch.save(
-        dict(state=s1, 
-             action=a, 
-             next_state=s2, 
-             reward=r, 
-             done=d, 
-             trajectory1=torch.from_numpy(env.robot1.trajectory), 
-             trajectory2=torch.from_numpy(env.robot2.trajectory)), args.storage)
+    torch.save(dict(state=s1, action=a, next_state=s2, reward=r, done=d, 
+                    trajectory1=torch.from_numpy(env.robot1.get_trajectory()).to(torch.float32), 
+                    trajectory2=torch.from_numpy(env.robot2.get_trajectory()).to(torch.float32)), 
+               args.storage)
