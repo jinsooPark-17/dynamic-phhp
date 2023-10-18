@@ -105,8 +105,10 @@ if __name__ == "__main__":
             "epochs": args.epochs, "steps per epoch": args.steps_per_epoch, "batch_size": LOCAL_BATCH_SIZE*size,
             "gamma": args.gamma, "polyak": args.polyak, "alpha": args.alpha, "learning rate": args.lr,
             "explore steps": args.explore_steps, "update after": args.update_after, "Test episodes": args.num_test_episodes*size,
-            "policy hz": args.policy_hz, "action size": args.act_dim, "opponents": args.opponent
-        })
+            "policy hz": args.policy_hz, "action size": args.act_dim, "opponents": ", ".join(args.opponents)},
+            metric_dict={}
+        )
+        logger.add_hparams()
 
     # Share policy
     replay = ReplayBuffer(obs_dim=640*2+3, act_dim=args.act_dim, size=int(args.replay_size/size+1))
@@ -120,13 +122,15 @@ if __name__ == "__main__":
 
     time.sleep(local_rank/tasks_per_node)
     launch_simulation(ID)
+    comm.Barrier()
 
     # Main loop
     total_steps = 0
     dist_reward = []
     for epoch in range(args.epochs):
-        t = 0
-        while t < args.steps_per_epoch:
+        step = 0
+        t_ep, t_train, t_test = 0., 0., 0.
+        while step < args.steps_per_epoch:
             # Save current policy in **local** /tmp directory
             if local_rank == 0:
                 torch.save( sac.ac.pi.state_dict(), "/tmp/model.pt" )
@@ -142,6 +146,7 @@ if __name__ == "__main__":
             x2, y2, yaw2 = -2.0, random.uniform(-0.5, 0.5), random.uniform(-pi/4., pi/4.) + pi
             gx2, gy2, gyaw2 = -12.0, 0.0, pi
 
+            start_time = time.time()
             time.sleep(local_rank/tasks_per_node)
             ep_proc = subprocess.Popen([
                 "singularity", "run", f"instance://{ID}", "python3", "episode/train_episode.py",
@@ -153,6 +158,7 @@ if __name__ == "__main__":
             ep_proc.wait()
             del ep_proc
             gc.collect()
+            t_ep += time.time() - start_time
 
             # Load episode result from file
             data = torch.load(f"/tmp/{ID}.pt")
@@ -172,25 +178,29 @@ if __name__ == "__main__":
                 ep_round += 1
 
             if total_steps > args.update_after:
-                info = torch.empty(ep_steps, 5)
+                start_time = time.time()
+                info = np.empty((ep_steps, 5), dtype=np.float32)
                 for k in range(ep_steps):
                     q_info, pi_info = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
                     
                     # log q1 value to tensorboard
-                    info[k,0] = q_info["Q1"]
-                    info[k,1] = q_info["Q2"]
+                    info[k,0] = q_info["Q1"].mean()
+                    info[k,1] = q_info["Q2"].mean()
                     info[k,2] = q_info["LossQ"]
-                    info[k,3] = pi_info["LogPi"]
+                    info[k,3] = pi_info["LogPi"].mean()
                     info[k,4] = pi_info["LossPi"]
+                t_train += time.time() - start_time
 
                 # Now log information to tensorboard
-                avg_info = comm.reduce(info, op=MPI.SUM, root=ROOT) / size
+                avg_info = (np.zeros((size, ep_steps, 5), dtype=np.float32) if rank==ROOT else None)
+                comm.Gather(info, avg_info, root=ROOT)
                 if rank == ROOT:
+                    avg_info = avg_info.mean(axis=0)
                     for k in range(ep_steps):
                         logger.add_scalars("Average Q value", {"Q1": info[k,0], "Q2": info[k,1]}, total_steps+k)
                         logger.add_scalar("Average Log PI", info[k,3], total_steps+k)
                         logger.add_scalars("Average Loss", {"Loss_Q": info[k,2], "Loss_PI": info[k,4]}, total_steps+k)
-            t+= ep_steps
+            step += ep_steps
             total_steps += ep_steps
 
         # Evaluate trained policy with test episode
@@ -208,6 +218,8 @@ if __name__ == "__main__":
                 gx1, gy1, gyaw1 = [ -2.0, 0.0, 0.0]
                 x2,  y2,  yaw2  = [ -2.0, 0.0, pi ]
                 gx2, gy2, gyaw2 = [-12.0, 0.0, pi ]
+                start_time = time.time()
+                time.sleep(local_rank/tasks_per_node)
                 ep_proc = subprocess.Popen([
                     "singularity", "run", f"instance://{ID}", "python3", "episode/train_episode.py",
                     "--storage", f"/tmp/{ID}.pt", "--network", "/tmp/model.pt", "--mode", "evaluate", "--opponent", opponent,
@@ -215,7 +227,7 @@ if __name__ == "__main__":
                     "--init_poses", f"{x2}", f"{y2}", f"{yaw2}", "--goal_poses", f"{gx2}", f"{gy2}", f"{gyaw2}",
                     "--timeout", "60.0", "--hz", f"{args.policy_hz}"], stderr=subprocess.DEVNULL)
                 ep_proc.wait()
-
+                t_test += time.time() - start_time
                 # Load episode result from file
                 new_data = torch.load(f"/tmp/{ID}.pt")
                 for key in ['trajectory1', 'trajectory2']:
@@ -245,8 +257,10 @@ if __name__ == "__main__":
         all_dist_reward = (np.zeros((size, len(dist_reward), 2)) if rank == ROOT else None)
         comm.Gather(np.array(dist_reward), all_dist_reward, root=ROOT)
 
-        avg_test_ep_reward = comm.reduce(test_ep_reward, op=MPI.SUM, root=ROOT) / LOCAL_TEST_EPISODES
+        avg_test_ep_reward = (np.zeros(size, 4) if rank==ROOT else None)
+        comm.Gather(test_ep_reward, avg_test_ep_reward, root=ROOT)
         if rank == ROOT:
+            avg_test_ep_reward = avg_test_ep_reward.mean(axis=0)
             logger.add_scalars('Average reward of test episode',
                                {'vanilla': avg_test_ep_reward[0],
                                 'baseline': avg_test_ep_reward[1],
@@ -267,6 +281,7 @@ if __name__ == "__main__":
             plt.cla()
             plt.clf()
             plt.close()
+            print(f"Episode {epoch+1} took\n\tepisodes: {t_ep:.2f} seconds\n\tbackprop: {t_train:.2f} seconds\n\ttest: {t_test:.2f} seconds", flush=True)
 
         # # Generate checkpoint
         if epoch % args.save_freq == 0 and rank == ROOT:
