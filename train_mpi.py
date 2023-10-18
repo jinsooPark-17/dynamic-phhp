@@ -100,7 +100,7 @@ if __name__ == "__main__":
 
     # Log hyper-parameters to tensorboard
     if rank == ROOT:
-        os.makedirs(f"{os.getenv('WORK')}/checkpoints/{jobID}")
+        if not os.path.exists(f"{os.getenv('WORK')}/checkpoints/{jobID}"): os.makedirs(f"{os.getenv('WORK')}/checkpoints/{jobID}")
         logger.add_hparams(hparam_dict={
             "epochs": args.epochs, "steps per epoch": args.steps_per_epoch, "batch_size": LOCAL_BATCH_SIZE*size,
             "gamma": args.gamma, "polyak": args.polyak, "alpha": args.alpha, "learning rate": args.lr,
@@ -108,7 +108,6 @@ if __name__ == "__main__":
             "policy hz": args.policy_hz, "action size": args.act_dim, "opponents": ", ".join(args.opponents)},
             metric_dict={}
         )
-        logger.add_hparams()
 
     # Share policy
     replay = ReplayBuffer(obs_dim=640*2+3, act_dim=args.act_dim, size=int(args.replay_size/size+1))
@@ -231,7 +230,7 @@ if __name__ == "__main__":
                 # Load episode result from file
                 new_data = torch.load(f"/tmp/{ID}.pt")
                 for key in ['trajectory1', 'trajectory2']:
-                    data[key] = torch.cat(data[key], new_data[key])
+                    data[key] = torch.cat((data[key], new_data[key]))
 
                 dist_reward += [[np.linalg.norm(new_data['trajectory1'][1:,:2] - new_data['trajectory1'][:-1,:2], axis=1).sum(), new_data['reward'].sum()]]
                 test_ep_reward[idx] += new_data['reward'].sum()
@@ -257,7 +256,7 @@ if __name__ == "__main__":
         all_dist_reward = (np.zeros((size, len(dist_reward), 2)) if rank == ROOT else None)
         comm.Gather(np.array(dist_reward), all_dist_reward, root=ROOT)
 
-        avg_test_ep_reward = (np.zeros(size, 4) if rank==ROOT else None)
+        avg_test_ep_reward = (np.zeros((size, 4)) if rank==ROOT else None)
         comm.Gather(test_ep_reward, avg_test_ep_reward, root=ROOT)
         if rank == ROOT:
             avg_test_ep_reward = avg_test_ep_reward.mean(axis=0)
@@ -268,9 +267,9 @@ if __name__ == "__main__":
                                 'dynamic': avg_test_ep_reward[3]})
 
             logger.add_figure('Trajectory of trained policy', fig, global_step=epoch+1)
-            plt.cla()
-            plt.clf()
-            plt.close()
+            # plt.cla()
+            # plt.clf()
+            # plt.close()
 
             avg_test_ep_reward = avg_test_ep_reward.reshape(-1,2).T
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,8))
@@ -278,12 +277,14 @@ if __name__ == "__main__":
             ax.set_xlim(0.0, 11.0)
             ax.set_ylim(-60.0, 10.0)
             logger.add_figure('Episode reward vs traveled distance', fig, global_step=epoch+1)
-            plt.cla()
-            plt.clf()
-            plt.close()
+            # plt.cla()
+            # plt.clf()
+            # plt.close()
             print(f"Episode {epoch+1} took\n\tepisodes: {t_ep:.2f} seconds\n\tbackprop: {t_train:.2f} seconds\n\ttest: {t_test:.2f} seconds", flush=True)
 
         # # Generate checkpoint
         if epoch % args.save_freq == 0 and rank == ROOT:
             sac.checkpoint(epoch+1, checkpoint_dir=f"{os.getenv('WORK')}/checkpoints/{jobID}/{epoch+1}.pt")
+    if rank == ROOT:
+        logger.close()
     os.system(f"singularity instance stop {ID}")
