@@ -41,5 +41,6 @@ if __name__=="__main__":
     )
     torch.save(dict(state=s1, action=a, next_state=s2, reward=r, done=d, 
                     trajectory1=torch.from_numpy(env.robot1.get_trajectory()).to(torch.float32), 
-                    trajectory2=torch.from_numpy(env.robot2.get_trajectory()).to(torch.float32)), 
+                    trajectory2=torch.from_numpy(env.robot2.get_trajectory()).to(torch.float32),
+                    ttd1=env.robot1.ttd, ttd2=env.robot2.ttd), 
                args.storage)

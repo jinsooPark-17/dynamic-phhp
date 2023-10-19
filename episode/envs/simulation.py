@@ -163,7 +163,7 @@ class I_Shaped_Hallway(Gazebo):
                 self.robot1.dynamic_hallucinate(*a.squeeze())
                 rospy.sleep(cycle)
 
-                reward += [(10 if self.robot1.is_arrived() else -cycle)]
+                reward += [(30 if self.robot1.is_arrived() else -cycle)]
                 done += [False]
 
                 state = torch.concat([state, s])

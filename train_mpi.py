@@ -101,13 +101,13 @@ if __name__ == "__main__":
     # Log hyper-parameters to tensorboard
     if rank == ROOT:
         if not os.path.exists(f"{os.getenv('WORK')}/checkpoints/{jobID}"): os.makedirs(f"{os.getenv('WORK')}/checkpoints/{jobID}")
-        logger.add_hparams(hparam_dict={
-            "epochs": args.epochs, "steps per epoch": args.steps_per_epoch, "batch_size": LOCAL_BATCH_SIZE*size,
-            "gamma": args.gamma, "polyak": args.polyak, "alpha": args.alpha, "learning rate": args.lr,
-            "explore steps": args.explore_steps, "update after": args.update_after, "Test episodes": args.num_test_episodes*size,
-            "policy hz": args.policy_hz, "action size": args.act_dim, "opponents": ", ".join(args.opponents)},
-            metric_dict={}
-        )
+        param = f"epochs: {args.epochs}\nsteps_per_epoch: {args.steps_per_epoch}\nbatch_size: {LOCAL_BATCH_SIZE*size}\n" \
+                f"gamma: {args.gamma}\npolyak: {args.polyak}\nalpha: {args.alpha}\nlearning_rate: {args.lr}\nalpha: {args.alpha}\n" \
+                f"explore_steps: {args.explore_steps}\nupdate_after: {args.update_after}\n" \
+                f"number of test episodes: {LOCAL_TEST_EPISODES*size}\n" \
+                f"policy_hz: {args.policy_hz}\naction_size: {args.act_dim}\nopponents: {', '.join(args.opponents)}"\
+                f"reward: -t + 30.0 * I_success"
+        logger.add_text('hyper-parameters', param)
 
     # Share policy
     replay = ReplayBuffer(obs_dim=640*2+3, act_dim=args.act_dim, size=int(args.replay_size/size+1))
@@ -122,6 +122,8 @@ if __name__ == "__main__":
     time.sleep(local_rank/tasks_per_node)
     launch_simulation(ID)
     comm.Barrier()
+
+
 
     # Main loop
     total_steps = 0
@@ -209,9 +211,11 @@ if __name__ == "__main__":
 
         if rank == ROOT:
             fig, ax = plt.subplots(nrows=4, ncols=1, figsize=(15,3*4))
+
+        test_ep_reward = torch.zeros(4, dtype=torch.float32)
+        ttd = np.zeros((4,2), dtype=torch.float32)
         for idx, opponent in enumerate( ['vanilla', 'baseline', 'phhp', 'dynamic'] ):
             data = dict(reward_dist=torch.empty(LOCAL_TEST_EPISODES,2), trajectory1=torch.empty(0,3), trajectory2=torch.empty(0,3))
-            test_ep_reward = np.zeros(shape=(4))
             for k in range(LOCAL_TEST_EPISODES):
                 x1,  y1,  yaw1  = [-12.0, 0.0, 0.0]
                 gx1, gy1, gyaw1 = [ -2.0, 0.0, 0.0]
@@ -234,6 +238,7 @@ if __name__ == "__main__":
 
                 dist_reward += [[np.linalg.norm(new_data['trajectory1'][1:,:2] - new_data['trajectory1'][:-1,:2], axis=1).sum(), new_data['reward'].sum()]]
                 test_ep_reward[idx] += new_data['reward'].sum()
+                ttd[idx] += [new_data['ttd1'], new_data['ttd2']]
  
             # collect data
             sendcounts1 = comm.gather( data['trajectory1'].numel(), root=ROOT )
@@ -249,37 +254,41 @@ if __name__ == "__main__":
             # Now create heatmap from trajectory information
             if rank == ROOT:
                 generate_heatmap(ax[idx], data1, data2, sigma=5.0, label=opponent)
-            # LOG reward per opponent
-            # Update reward vs Dist scatter plot
-            # Convert trajectory points to 2d histogram
         # Collect information
-        all_dist_reward = (np.zeros((size, len(dist_reward), 2)) if rank == ROOT else None)
-        comm.Gather(np.array(dist_reward), all_dist_reward, root=ROOT)
+        all_dist_reward = (np.zeros((size, len(dist_reward), 2), dtype=np.float32) if rank == ROOT else None)
+        comm.Gather(np.array(dist_reward, dtype=np.float32), all_dist_reward, ROOT)
 
-        avg_test_ep_reward = (np.zeros((size, 4)) if rank==ROOT else None)
-        comm.Gather(test_ep_reward, avg_test_ep_reward, root=ROOT)
+        avg_test_ep_reward = (torch.zeros(4, dtype=torch.float32) if rank==ROOT else None)
+        comm.Reduce([test_ep_reward, MPI.FLOAT], [avg_test_ep_reward, MPI.FLOAT], MPI.SUM, ROOT)
+
+        avg_ttd = (np.zeros((4,2), dtype=np.float32) if rank==ROOT else None)
+        comm.Reduce([ttd, MPI.FLOAT], [avg_ttd, MPI.FLOAT], MPI.SUM, ROOT)
         if rank == ROOT:
-            avg_test_ep_reward = avg_test_ep_reward.mean(axis=0)
+            logger.add_scalars('Time to destination/Vanilla', {'Dynamic': avg_ttd[0,0], 'Vanilla': avg_ttd[0,1]})
+            logger.add_scalars('Time to destination/Baseline', {'Dynamic': avg_ttd[0,0], 'Baseline': avg_ttd[0,1]})
+            logger.add_scalars('Time to destination/PHHP', {'Dynamic': avg_ttd[0,0], 'PHHP': avg_ttd[0,1]})
+            logger.add_scalars('Time to destination/Dynamic', {'Dynamic': avg_ttd[0,0], 'Dynamic': avg_ttd[0,1]})
             logger.add_scalars('Average reward of test episode',
-                               {'vanilla': avg_test_ep_reward[0],
-                                'baseline': avg_test_ep_reward[1],
-                                'phhp': avg_test_ep_reward[2],
-                                'dynamic': avg_test_ep_reward[3]})
+                               {'Vanilla': avg_test_ep_reward[0].item(),
+                                'Baseline': avg_test_ep_reward[1].item(),
+                                'PHHP': avg_test_ep_reward[2].item(),
+                                'Dynamic': avg_test_ep_reward[3].item()}, global_step=epoch+1)
 
             logger.add_figure('Trajectory of trained policy', fig, global_step=epoch+1)
-            # plt.cla()
-            # plt.clf()
-            # plt.close()
+            plt.cla()
+            plt.clf()
+            plt.close()
 
-            avg_test_ep_reward = avg_test_ep_reward.reshape(-1,2).T
+            all_dist_reward = all_dist_reward.reshape(-1,2).T
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,8))
-            ax.scatter(avg_test_ep_reward[0], avg_test_ep_reward[1], s=3, c='k')
+            ax.scatter(all_dist_reward[0], all_dist_reward[1], s=3, c='k')
             ax.set_xlim(0.0, 11.0)
             ax.set_ylim(-60.0, 10.0)
             logger.add_figure('Episode reward vs traveled distance', fig, global_step=epoch+1)
-            # plt.cla()
-            # plt.clf()
-            # plt.close()
+            plt.cla()
+            plt.clf()
+            plt.close()
+            del all_dist_reward
             print(f"Episode {epoch+1} took\n\tepisodes: {t_ep:.2f} seconds\n\tbackprop: {t_train:.2f} seconds\n\ttest: {t_test:.2f} seconds", flush=True)
 
         # # Generate checkpoint
