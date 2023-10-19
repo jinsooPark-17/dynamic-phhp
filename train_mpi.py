@@ -213,7 +213,7 @@ if __name__ == "__main__":
             fig, ax = plt.subplots(nrows=4, ncols=1, figsize=(15,3*4))
 
         test_ep_reward = torch.zeros(4, dtype=torch.float32)
-        ttd = np.zeros((4,2), dtype=torch.float32)
+        ttd = np.zeros((4,2), dtype=np.float32)
         for idx, opponent in enumerate( ['vanilla', 'baseline', 'phhp', 'dynamic'] ):
             data = dict(reward_dist=torch.empty(LOCAL_TEST_EPISODES,2), trajectory1=torch.empty(0,3), trajectory2=torch.empty(0,3))
             for k in range(LOCAL_TEST_EPISODES):
@@ -264,10 +264,13 @@ if __name__ == "__main__":
         avg_ttd = (np.zeros((4,2), dtype=np.float32) if rank==ROOT else None)
         comm.Reduce([ttd, MPI.FLOAT], [avg_ttd, MPI.FLOAT], MPI.SUM, ROOT)
         if rank == ROOT:
-            logger.add_scalars('Time to destination/Vanilla', {'Dynamic': avg_ttd[0,0], 'Vanilla': avg_ttd[0,1]})
-            logger.add_scalars('Time to destination/Baseline', {'Dynamic': avg_ttd[0,0], 'Baseline': avg_ttd[0,1]})
-            logger.add_scalars('Time to destination/PHHP', {'Dynamic': avg_ttd[0,0], 'PHHP': avg_ttd[0,1]})
-            logger.add_scalars('Time to destination/Dynamic', {'Dynamic': avg_ttd[0,0], 'Dynamic': avg_ttd[0,1]})
+            avg_ttd /= size*LOCAL_TEST_EPISODES
+            logger.add_scalars('Time to destination/Vanilla', {'Dynamic': avg_ttd[0,0], 'Vanilla': avg_ttd[0,1]}, global_step=epoch+1)
+            logger.add_scalars('Time to destination/Baseline', {'Dynamic': avg_ttd[0,0], 'Baseline': avg_ttd[0,1]}, global_step=epoch+1)
+            logger.add_scalars('Time to destination/PHHP', {'Dynamic': avg_ttd[0,0], 'PHHP': avg_ttd[0,1]}, global_step=epoch+1)
+            logger.add_scalars('Time to destination/Dynamic', {'Dynamic': avg_ttd[0,0], 'Dynamic': avg_ttd[0,1]}, global_step=epoch+1)
+
+            avg_test_ep_reward /= size*LOCAL_TEST_EPISODES
             logger.add_scalars('Average reward of test episode',
                                {'Vanilla': avg_test_ep_reward[0].item(),
                                 'Baseline': avg_test_ep_reward[1].item(),
