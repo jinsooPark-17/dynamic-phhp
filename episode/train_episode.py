@@ -6,7 +6,7 @@ import argparse
 from collections import namedtuple
 
 from envs.simulation import I_Shaped_Hallway
-from policy.policy import Actor
+from policy.td3_policy import Actor
 Pose = namedtuple("Pose", "x y yaw")
 
 if __name__=="__main__":
@@ -19,6 +19,7 @@ if __name__=="__main__":
     parser.add_argument("--init_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
     parser.add_argument("--goal_poses", type=float, nargs=3, action='append', metavar=('x','y','yaw'))
     parser.add_argument("--timeout", type=float, default=60.0, help="Set timeout for episode (default: 60.0s)")
+    parser.add_argument("--noise_scale", type=float, default=0.3, help="Set noise scale of TD3 network")
     parser.add_argument("--hz", type=float, default=1.0, help="Set frequency of RL-policy (default: 1.0/s)")
     args = parser.parse_args()
 
@@ -37,7 +38,7 @@ if __name__=="__main__":
     model.load_state_dict(args.network)
     s1, a, s2, r, d = env.run_episode(
         init_poses=args.init_poses, goal_poses=args.goal_poses, opponent=args.opponent, timeout=args.timeout,
-        mode=args.mode, policy=model, cycle=args.hz, shuffle=(False if args.mode=='evaluate' else True)
+        mode=args.mode, policy=model, noise_scale=args.noise_scale, cycle=args.hz, shuffle=(False if args.mode=='evaluate' else True)
     )
     torch.save(dict(state=s1, action=a, next_state=s2, reward=r, done=d, 
                     trajectory1=torch.from_numpy(env.robot1.get_trajectory()).to(torch.float32), 

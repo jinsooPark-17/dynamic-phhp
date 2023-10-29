@@ -110,7 +110,7 @@ class I_Shaped_Hallway(Gazebo):
         return np.array([[ttd1, dx1, dy1, success1], [ttd2, dx2, dy2, success2]])
 
     def run_episode(self, init_poses, goal_poses, opponent: str="vanilla", timeout: float=30.0, 
-                    mode: str="explore", policy=None, cycle: float=1.0, shuffle=True):
+                    mode: str="explore", policy=None, noise_scale: float=0.3, cycle: float=1.0, shuffle=True):
         # randomize init & goal position
         if shuffle and np.random.normal() > 0.0:
             init_poses = init_poses[::-1]
@@ -156,10 +156,10 @@ class I_Shaped_Hallway(Gazebo):
                     a = torch.rand(1, 3) * 2.0 - 1.0
                 elif mode == "exploit":
                     with torch.no_grad():
-                        a, _ = policy(s)
+                        a = policy(s, deterministic=False, noise_scale=noise_scale)
                 elif mode == "evaluate":
                     with torch.no_grad():
-                        a, _ = policy(s, deterministic=True)
+                        a = policy(s, deterministic=True, noise_scale=None)
                 self.robot1.dynamic_hallucinate(*a.squeeze())
                 rospy.sleep(cycle)
 
@@ -168,7 +168,7 @@ class I_Shaped_Hallway(Gazebo):
 
                 state = torch.concat([state, s])
                 action = torch.concat([action, a])
-        done[-1] = True
+        done[-1] = (True if self.robot1.is_arrived() and self.robot2.is_arrived() else False)
         state = torch.concat([state, self.robot1.get_state()])
 
         return (state[:-1],     # state
