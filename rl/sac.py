@@ -1,4 +1,5 @@
 import os
+import time
 from copy import deepcopy
 import itertools
 import numpy as np
@@ -142,16 +143,20 @@ class SAC:
         return loss_q, loss_pi
 
     def update_mpi(self, batch, comm):
+        t_comm = 0.
         # Update Q1 and Q2
+        start_time = time.time()
         self.q_optim.zero_grad()
         loss_q, q_info = self.compute_loss_q( batch )
         loss_q.backward()
 
         # Average gradient across MPI jobs
+        start_time = time.time()
         for p in self.q_params:
             p_grad_numpy = p.grad.numpy()
             avg_p_grad = comm.allreduce(p.grad) / comm.Get_size()
             p_grad_numpy[:] = avg_p_grad[:]
+        t_comm += time.time() - start_time
         self.q_optim.step()
 
         # Freeze Q-network
@@ -164,10 +169,12 @@ class SAC:
         loss_pi.backward()
 
         # Average gradient across MPI jobs
+        start_time = time.time()
         for p in self.ac.pi.parameters():
             p_grad_numpy = p.grad.numpy()
             avg_p_grad = comm.allreduce(p.grad) / comm.Get_size()
             p_grad_numpy[:] = avg_p_grad[:]
+        t_comm += time.time() - start_time
         self.pi_optim.step()
 
         # Unfreeze Q-network
@@ -180,7 +187,7 @@ class SAC:
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1.-self.polyak)*p.data)
         
-        return q_info, pi_info
+        return q_info, pi_info, t_comm
 
     def save(self, network_dir):
         torch.save(self.ac.pi.state_dict(), os.path.join(network_dir, "pi"))

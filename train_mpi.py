@@ -63,12 +63,15 @@ def generate_heatmap(ax, data1, data2, sigma=5.0, label='baseline'):
     ax.set_yticks([])
     ax.legend(markerscale=5)
 
+def test_policy(comm, size, rank):
+    pass
+
 if __name__ == "__main__":
     # Define argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, required=True)
     parser.add_argument("--steps_per_epoch", type=int, default=10_000, required=True)
-    parser.add_argument("--replay_size", type=int, default=int(1e7))
+    parser.add_argument("--replay_size", type=int, default=int(3e4))
     parser.add_argument("--gamma", type=float, default=0.99, help="(default: 0.99)")
     parser.add_argument("--polyak", type=float, default=0.005, help="(default: 0.995)")
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -130,7 +133,7 @@ if __name__ == "__main__":
     dist_reward = []
     for epoch in range(args.epochs):
         step = 0
-        t_ep, t_train, t_test = 0., 0., 0.
+        t_ep, t_train, t_network, t_test = 0., 0., 0., 0.
         while step < args.steps_per_epoch:
             # Save current policy in **local** /tmp directory
             if local_rank == 0:
@@ -180,27 +183,23 @@ if __name__ == "__main__":
 
             if total_steps > args.update_after:
                 start_time = time.time()
-                info = np.empty((ep_steps, 5), dtype=np.float32)
+                info = np.empty((ep_steps, 2), dtype=np.float32)
                 for k in range(ep_steps):
-                    q_info, pi_info = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
-                    
+                    q_info, pi_info, t_comm = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
+                    t_network += t_comm
                     # log q1 value to tensorboard
-                    info[k,0] = q_info["Q1"].mean()
-                    info[k,1] = q_info["Q2"].mean()
-                    info[k,2] = q_info["LossQ"]
-                    info[k,3] = pi_info["LogPi"].mean()
-                    info[k,4] = pi_info["LossPi"]
+                    info[k,0] = q_info["LossQ"]
+                    info[k,1] = pi_info["LossPi"]
                 t_train += time.time() - start_time
 
                 # Now log information to tensorboard
-                avg_info = (np.zeros((size, ep_steps, 5), dtype=np.float32) if rank==ROOT else None)
+                avg_info = (np.zeros((size, ep_steps, 2), dtype=np.float32) if rank==ROOT else None)
                 comm.Gather(info, avg_info, root=ROOT)
                 if rank == ROOT:
                     avg_info = avg_info.mean(axis=0)
                     for k in range(ep_steps):
-                        logger.add_scalars("Average Q value", {"Q1": info[k,0], "Q2": info[k,1]}, total_steps+k)
-                        logger.add_scalar("Average Log PI", info[k,3], total_steps+k)
-                        logger.add_scalars("Average Loss", {"Loss_Q": info[k,2], "Loss_PI": info[k,4]}, total_steps+k)
+                        logger.add_scalar("Loss/Q", info[k,1], total_steps+k)
+                        logger.add_scalar("Loss/PI", info[k,1], total_steps+k)
             step += ep_steps
             total_steps += ep_steps
 
@@ -265,22 +264,18 @@ if __name__ == "__main__":
         comm.Reduce([ttd, MPI.FLOAT], [avg_ttd, MPI.FLOAT], MPI.SUM, ROOT)
         if rank == ROOT:
             avg_ttd /= size*LOCAL_TEST_EPISODES
-            logger.add_scalars('Time to destination/Vanilla', {'Dynamic': avg_ttd[0,0], 'Vanilla': avg_ttd[0,1]}, global_step=epoch+1)
-            logger.add_scalars('Time to destination/Baseline', {'Dynamic': avg_ttd[0,0], 'Baseline': avg_ttd[0,1]}, global_step=epoch+1)
-            logger.add_scalars('Time to destination/PHHP', {'Dynamic': avg_ttd[0,0], 'PHHP': avg_ttd[0,1]}, global_step=epoch+1)
-            logger.add_scalars('Time to destination/Dynamic', {'Dynamic': avg_ttd[0,0], 'Dynamic': avg_ttd[0,1]}, global_step=epoch+1)
+            logger.add_scalar('TTD advantage/vs Vanilla', avg_ttd[0,0] - avg_ttd[0,1], global_step=epoch+1)
+            logger.add_scalar('TTD advantage/vs Baseline', avg_ttd[1,0] - avg_ttd[1,1], global_step=epoch+1)
+            logger.add_scalar('TTD advantage/vs PHHP', avg_ttd[2,0] - avg_ttd[2,1], global_step=epoch+1)
+            logger.add_scalar('TTD advantage/Dynamic', (avg_ttd[3,0]+avg_ttd[3,1])/2., global_step=epoch+1)
 
             avg_test_ep_reward /= size*LOCAL_TEST_EPISODES
-            logger.add_scalars('Average reward of test episode',
-                               {'Vanilla': avg_test_ep_reward[0].item(),
-                                'Baseline': avg_test_ep_reward[1].item(),
-                                'PHHP': avg_test_ep_reward[2].item(),
-                                'Dynamic': avg_test_ep_reward[3].item()}, global_step=epoch+1)
+            logger.add_scalar('Test Episode Reward/vs Vanilla', avg_test_ep_reward[0], global_step=epoch+1)
+            logger.add_scalar('Test Episode Reward/vs Baseline', avg_test_ep_reward[1], global_step=epoch+1)
+            logger.add_scalar('Test Episode Reward/vs PHHP', avg_test_ep_reward[2], global_step=epoch+1)
+            logger.add_scalar('Test Episode Reward/vs Dynamic', avg_test_ep_reward[3], global_step=epoch+1)
 
             logger.add_figure('Trajectory of trained policy', fig, global_step=epoch+1)
-            plt.cla()
-            plt.clf()
-            plt.close()
 
             all_dist_reward = all_dist_reward.reshape(-1,2).T
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,8))
@@ -288,11 +283,13 @@ if __name__ == "__main__":
             ax.set_xlim(0.0, 11.0)
             ax.set_ylim(-60.0, 10.0)
             logger.add_figure('Episode reward vs traveled distance', fig, global_step=epoch+1)
-            plt.cla()
-            plt.clf()
-            plt.close()
             del all_dist_reward
-            print(f"Episode {epoch+1} took\n\tepisodes: {t_ep:.2f} seconds\n\tbackprop: {t_train:.2f} seconds\n\ttest: {t_test:.2f} seconds", flush=True)
+            print(f"Episode {epoch+1} took")
+            print(f"\tepisodes: {t_ep:.2f} seconds")
+            print(f"\ttrain: {t_train:.2f} seconds")
+            print(f"\t\tnetwork: {t_network:.2f} seconds")
+            print(f"\t\tbackprop: {t_train-t_network:.2f} seconds")
+            print(f"\ttest: {t_test:.2f} seconds", flush=True)
 
         # # Generate checkpoint
         if epoch % args.save_freq == 0 and rank == ROOT:
