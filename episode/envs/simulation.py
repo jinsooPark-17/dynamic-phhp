@@ -122,13 +122,13 @@ class I_Shaped_Hallway(Gazebo):
 
             # Assume both robots are vanilla robots
             self.robot1.move(goal_poses[0].x, goal_poses[0].y, goal_poses[0].yaw, mode="vanilla", timeout=timeout)
-            if opponent is "custom":
+            if opponent == "custom":
                 radius, gap = 1.0,  np.random.choice([-0.05, 0.05])
                 p_begin, p_end = np.sort(np.random.uniform(0.0, 1.0, 2))
                 self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout,
                                  comms_topic=f"/{self.robot1.id}/amcl_pose", detection_range=8.0,
                                  radius=radius, gap=gap, p_begin=p_begin, p_end=p_end)
-            elif opponent is "dynamic":
+            elif opponent == "dynamic":
                 self.robot2.move(goal_poses[1].x, goal_poses[1].y, goal_poses[1].yaw, mode=opponent, timeout=timeout,
                                  policy=policy, cycle=cycle)
             else:

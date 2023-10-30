@@ -20,6 +20,10 @@ from episode.policy.policy import ActorCritic
 from rl.sac import ReplayBuffer, SAC
 from torch.utils.tensorboard import SummaryWriter
 
+def convert_sec(sec):
+    mm, ss = divmod(sec, 60)
+    return f'{mm:02.0f}m {ss:02.0f}s'
+
 def launch_simulation(ID):
     # Initiate ROS-Gazebo simulation
     for n_restart in range(10): # Max restart 10 times
@@ -125,8 +129,6 @@ if __name__ == "__main__":
     time.sleep(local_rank/tasks_per_node)
     launch_simulation(ID)
     comm.Barrier()
-
-
 
     # Main loop
     total_steps = 0
@@ -264,10 +266,10 @@ if __name__ == "__main__":
         comm.Reduce([ttd, MPI.FLOAT], [avg_ttd, MPI.FLOAT], MPI.SUM, ROOT)
         if rank == ROOT:
             avg_ttd /= size*LOCAL_TEST_EPISODES
-            logger.add_scalar('TTD advantage/vs Vanilla', avg_ttd[0,0] - avg_ttd[0,1], global_step=epoch+1)
-            logger.add_scalar('TTD advantage/vs Baseline', avg_ttd[1,0] - avg_ttd[1,1], global_step=epoch+1)
-            logger.add_scalar('TTD advantage/vs PHHP', avg_ttd[2,0] - avg_ttd[2,1], global_step=epoch+1)
-            logger.add_scalar('TTD advantage/Dynamic', (avg_ttd[3,0]+avg_ttd[3,1])/2., global_step=epoch+1)
+            logger.add_scalar('TTD advantage/vs Vanilla', avg_ttd[0,1] - avg_ttd[0,0], global_step=epoch+1)
+            logger.add_scalar('TTD advantage/vs Baseline', avg_ttd[1,1] - avg_ttd[1,0], global_step=epoch+1)
+            logger.add_scalar('TTD advantage/vs PHHP', avg_ttd[2,1] - avg_ttd[2,0], global_step=epoch+1)
+            logger.add_scalar('TTD advantage/Dynamic', (avg_ttd[3,1]+avg_ttd[3,0])/2., global_step=epoch+1)
 
             avg_test_ep_reward /= size*LOCAL_TEST_EPISODES
             logger.add_scalar('Test Episode Reward/vs Vanilla', avg_test_ep_reward[0], global_step=epoch+1)
@@ -284,16 +286,17 @@ if __name__ == "__main__":
             ax.set_ylim(-60.0, 10.0)
             logger.add_figure('Episode reward vs traveled distance', fig, global_step=epoch+1)
             del all_dist_reward
-            print(f"Episode {epoch+1} took")
-            print(f"\tepisodes: {t_ep:.2f} seconds")
-            print(f"\ttrain: {t_train:.2f} seconds")
-            print(f"\t\tnetwork: {t_network:.2f} seconds")
-            print(f"\t\tbackprop: {t_train-t_network:.2f} seconds")
-            print(f"\ttest: {t_test:.2f} seconds", flush=True)
+
+            print(f"Episode {epoch} took total {convert_sec(t_ep+t_train+t_test)}")
+            print(f"\tepisodes: {convert_sec(t_ep)}")
+            print(f"\ttrain:    {convert_sec(t_train)}")
+            print(f"\t\tnetwork:  {convert_sec(t_network)}")
+            print(f"\t\tbackprop: {convert_sec(t_train-t_network)}")
+            print(f"\ttest:     {convert_sec(t_test)}", flush=True)
 
         # # Generate checkpoint
         if epoch % args.save_freq == 0 and rank == ROOT:
-            sac.checkpoint(epoch+1, checkpoint_dir=f"{os.getenv('WORK')}/checkpoints/{jobID}/{epoch+1}.pt")
+            sac.checkpoint(epoch, checkpoint_dir=f"{os.getenv('WORK')}/checkpoints/{jobID}/{epoch+1}.pt")
     if rank == ROOT:
         logger.close()
-    os.system(f"singularity instance stop {ID}")
+    os.system(f"singularity instance stop {ID} > /dev/null 2>&1")
