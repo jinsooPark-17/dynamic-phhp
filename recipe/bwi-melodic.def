@@ -41,8 +41,9 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
                        ros-melodic-dynamic-reconfigure ros-melodic-message-filters ros-melodic-map-msgs ros-melodic-xacro \
                        ros-melodic-laser-filters ros-melodic-nodelet ros-melodic-pluginlib ros-melodic-roslint ros-melodic-move-base \
                        ros-melodic-move-base-msgs ros-melodic-amcl ros-melodic-nav-msgs ros-melodic-depthimage-to-laserscan \
-                       ros-melodic-pointcloud-to-laserscan ros-melodic-pr2-description ros-melodic-dwa-local-planner \
-                       ros-melodic-eband-local-planner ros-melodic-global-planner ros-melodic-rviz ros-melodic-octomap
+                       ros-melodic-pointcloud-to-laserscan ros-melodic-pr2-description \
+                       ros-melodic-dwa-local-planner ros-melodic-eband-local-planner ros-melodic-teb-local-planner\
+                       ros-melodic-global-planner ros-melodic-rviz ros-melodic-octomap
     # Download BWI repo
     mkdir -p /bwi_ws/src && cd /bwi_ws/src
     git clone -b jinsoo/light-hal-sim https://github.com/utexas-bwi/bwi.git
@@ -89,4 +90,4 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     #!/bin/bash
     export ROS_LOG_DIR=/tmp/roslog/`uuid`
     source /bwi_ws/devel/setup.bash
-    roslaunch bwi_launch two_robot_simulation.launch --screen
+    roslaunch bwi_launch two_robot_simulation.launch --screen "$@"

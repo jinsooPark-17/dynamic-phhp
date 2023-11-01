@@ -15,13 +15,13 @@ if __name__=="__main__":
     # Perform episode
     env = I_Shaped_Hallway()
 
-    result = np.empty((2*args.num_test,5))
+    result = np.empty((2*args.num_test,6))
     for i in range(args.num_test):
         d1, d2 = np.random.uniform(low=4.0, high=12.0, size=2)
         init_poses = [Pose(-12.0   , 0.0, 0.0), Pose(0.0, 0.0   , -np.pi/2.)]
         goal_poses = [Pose(-12.0+d1, 0.0, 0.0), Pose(0.0, 0.0-d2, -np.pi/2.)]
         ep_result = env.test_precision(init_poses, goal_poses, timeout=40.0)
-        result[2*i:2*i+2] = np.hstack(([[d1],[d2]], ep_result))
+        result[2*i:2*i+2] = np.hstack(([[d1, 0.0],[d2, -np.pi/2.]], ep_result))
 
     # save numpy array to file
     with open(args.storage, 'wb') as f:

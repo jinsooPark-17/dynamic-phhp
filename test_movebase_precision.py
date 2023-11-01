@@ -5,10 +5,15 @@ import numpy as np
 import pandas as pd
 import mpi4py
 mpi4py.rc.recv_mprobe = False
+import argparse
 import subprocess
 from mpi4py import MPI
 
 if __name__=='__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--planner', type=str, choices=['eband', 'dwa', 'teb'], default='eband')
+    args = parser.parse_args()
+
     ID = uuid.uuid4()
     n_test = 100
 
@@ -21,7 +26,7 @@ if __name__=='__main__':
 
     available=True
     for n_restart in range(10): # Max restart 10 times
-        os.system(f"singularity instance start --net --network=none {os.getenv('CONTAINER')} {ID} > /dev/null 2>&1")
+        os.system(f"singularity instance start --net --network=none {os.getenv('CONTAINER')} {ID} local_planner1:={args.planner} local_planner2:={args.planner} > /dev/null 2>&1")
         time.sleep(5.0)
         test_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "/wait_until_stable"])
         try:
@@ -61,8 +66,9 @@ if __name__=='__main__':
     if rank==0:
         if not os.path.exists(f"{os.getenv('WORK')}/data"):
             os.makedirs(f"{os.getenv('WORK')}/data")
-        df = pd.DataFrame(recv_arr.reshape(-1,data.shape[-1]), columns=["travel_dist", "ttd", "dx", "dy", "success"])
-        df.to_csv(f"{os.getenv('WORK')}/data/movebase_precision_result.{os.getenv('SLURM_JOB_ID')}.csv", index=False)
+        df = pd.DataFrame(recv_arr.reshape(-1,data.shape[-1]), columns=["travel_dist", "goal_yaw", "ttd", "dx", "dy", "success"])
+        df['nav_system'] = args.planner
+        df.to_csv(f"{os.getenv('WORK')}/data/movebase_precision_{args.planner}_result.{os.getenv('SLURM_JOB_ID')}.csv", index=False)
 
         print(f"MoveBase precision experiment result with {size*n_test*2} episodes")
         print(df.mean(axis=0))

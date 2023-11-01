@@ -288,11 +288,11 @@ if __name__ == "__main__":
             del all_dist_reward
 
             print(f"Episode {epoch} took total {convert_sec(t_ep+t_train+t_test)}")
-            print(f"\tepisodes: {convert_sec(t_ep)}")
-            print(f"\ttrain:    {convert_sec(t_train)}")
-            print(f"\t\tnetwork:  {convert_sec(t_network)}")
-            print(f"\t\tbackprop: {convert_sec(t_train-t_network)}")
-            print(f"\ttest:     {convert_sec(t_test)}", flush=True)
+            print(f"\tepisodes:   {convert_sec(t_ep)}")
+            print(f"\ttrain:      {convert_sec(t_train)}")
+            print(f"\t  network:  {convert_sec(t_network)}")
+            print(f"\t  backprop: {convert_sec(t_train-t_network)}")
+            print(f"\ttest:       {convert_sec(t_test)}", flush=True)
 
         # # Generate checkpoint
         if epoch % args.save_freq == 0 and rank == ROOT:

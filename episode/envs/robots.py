@@ -312,8 +312,8 @@ class AllinOne(object):
 
         if dist[min_idx] <= self.__movebase_args["detection_range"]:
             self.__movebase_args["active"] = True
-            d_min = max(dist[min_idx]*self.__movebase_args["p_begin"], self.__movebase_args["radius"]+0.5)
-            d_max = min(dist[min_idx]*self.__movebase_args["p_end"], dist[-1]-(self.__movebase_args["radius"]+0.5))
+            d_min = max(dist[min_idx]*self.__movebase_args["p_begin"], self.__movebase_args["radius"]+1.0)
+            d_max = min(dist[min_idx]*self.__movebase_args["p_end"], dist[-1]-(self.__movebase_args["radius"]+1.0))
             if d_min > d_max:
                 return
 
