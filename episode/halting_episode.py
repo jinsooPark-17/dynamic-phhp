@@ -13,7 +13,7 @@ from nav_msgs.msg import OccupancyGrid
 Pose = namedtuple( "Pose", "x y yaw" )
 rng = np.random.default_rng()
 
-def reset_episode( robots, init_poses ):
+def reset_episode( robots, reset_poses, init_poses ):
     # Reset episode
     ## Immediately stop any previous motion
     for r in robots:
@@ -21,16 +21,16 @@ def reset_episode( robots, init_poses ):
     rospy.sleep( 1.0 )
 
     ## Teleport robots to initial pose
-    for r, p in zip( robots, init_poses ):
+    for r, p in zip( robots, reset_poses ):
         env.teleport( r.id, p.x, p.y, p.yaw )
-    for r, p in zip( robots, init_poses ):
+    for r, p in zip( robots, reset_poses ):
         # Run second round to avoid overlap
         env.teleport( r.id, p.x, p.y, p.yaw )
     rospy.sleep( 1.0 )
 
     ## Localize robots to new position
     for _ in range(15):
-        for r, p in zip( robots, init_poses ):
+        for r, p in zip( robots, reset_poses ):
             r.localize( p.x, p.y, p.yaw )
         rospy.sleep( 0.1 )
     rospy.sleep( 2.0 )
@@ -39,10 +39,22 @@ def reset_episode( robots, init_poses ):
     for r in robots:
         r.clear_costmap( )
 
-def begin_episode( robots, init_poses, goal_poses, max_retry=10, timeout=60. ):
+    ## Move to episode init_pose
+    for r, (x, y, yaw) in zip( robots, init_poses ):
+        r.move(x, y, yaw)
+
+    while not rospy.is_shutdown():
+        for r in robots:
+            if r.is_running() is True:
+                break
+        else:
+            break
+    print("Robot moves to init_pose")
+
+def begin_episode( robots, reset_poses, init_poses, goal_poses, max_retry=10, timeout=60. ):
     for _ in range(max_retry):
         # Retry episode if ANY robots failed within 0.5 seconds
-        reset_episode(robots=robots, init_poses=init_poses)
+        reset_episode(robots=robots, reset_poses=reset_poses, init_poses=init_poses)
 
         for r, g in zip(robots, goal_poses):
             r.move( g.x, g.y, g.yaw, mode='vanilla', timeout=timeout)
@@ -60,14 +72,14 @@ def path_distance(r0, r1, g0, g1):
     dist0 = np.linalg.norm( plan0 - plan1[0], axis=1 )
     dist1 = np.linalg.norm( plan1 - plan0[0], axis=1 )
 
-    idx0 = np.argwhere( dist0 < 0.5 )
-    idx1 = np.argwhere( dist1 < 0.5 )
-    d0 = (np.inf if idx0.size==0 else np.linalg.norm( plan0[1:] - plan0[:-1] , axis=1 )[idx0-1])
-    d1 = (np.inf if idx0.size==0 else np.linalg.norm( plan1[1:] - plan1[:-1] , axis=1 )[idx1-1])
+    idx0 = np.argwhere( dist0 < 0.5 ).squeeze()
+    idx1 = np.argwhere( dist1 < 0.5 ).squeeze()
+    d0 = (np.inf if idx0.size==0 else np.cumsum(np.linalg.norm( plan0[1:] - plan0[:-1] , axis=1 ))[idx0[0]-1])
+    d1 = (np.inf if idx0.size==0 else np.cumsum(np.linalg.norm( plan1[1:] - plan1[:-1] , axis=1 ))[idx1[0]-1])
     return max(d0, d1), plan0[0], plan1[0]
 
-def sample_waypoint_features(id, p0, p1, threshold=0.65, n_sample=800):
-    costmap_msg = rospy.wait_for_message( os.path.join( [id, 'move_base', 'local_costmap', 'costmap']), OccupancyGrid )
+def sample_waypoint_features(name, p0, p1, threshold=0.65, n_sample=800):
+    costmap_msg = rospy.wait_for_message( os.path.join(name, 'move_base', 'local_costmap', 'costmap'), OccupancyGrid )
     h = costmap_msg.info.height
     w = costmap_msg.info.width
     resolution = costmap_msg.info.resolution
@@ -105,7 +117,7 @@ def sample_waypoint_features(id, p0, p1, threshold=0.65, n_sample=800):
 
     samples = samples * resolution + origin
 
-    return samples, np.vstack( (d1, d2, d3, d4) )
+    return samples, np.vstack((d1, d2, d3, d4)).T
 
 class ExactGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood):
@@ -133,7 +145,7 @@ if __name__ == '__main__':
     robot_ids = np.array([ 'marvin', 'rob' ], dtype=str)
 
     env = Gazebo( )
-    robot_ids = np.arange( robot_ids.shape[0] )
+    robot_idx = np.arange( robot_ids.shape[0] )
     robots = np.array( [AllinOne(id) for id in robot_ids] )
     available = np.full_like( robot_ids, fill_value=True, dtype=np.bool_ )
     info = np.zeros((robot_ids.shape[0], 2), dtype=object)    # goal, TTD
@@ -155,11 +167,11 @@ if __name__ == '__main__':
         optimizer.step()
 
     # Define episode configuration
-    p0, g0 = Pose( -16.0, 0.0, 0.0 ), Pose(   0.0, 0.0, 0.0 )
-    p1, g1 = Pose(  -6.0, 0.0,  pi ), Pose( -22.0, 0.0,  pi )
+    r0, p0, g0 = Pose(-20.0, 0.0, 0.0), Pose( -16.0, 0.0, 0.0 ), Pose(   0.0, 0.0, 0.0 )
+    r1, p1, g1 = Pose( -2.0, 0.0,  pi), Pose(  -6.0, 0.0,  pi ), Pose( -22.0, 0.0,  pi )
 
     # Halting episode
-    begin_episode(robots=robots, init_poses=[p0,p1], goal_poses=[g0,g1])
+    begin_episode(robots=robots, reset_poses=[r0,r1], init_poses=[p0,p1], goal_poses=[g0,g1])
     while not rospy.is_shutdown():
         # Termination condition: when all robots stopped
         for r in robots:
@@ -173,7 +185,7 @@ if __name__ == '__main__':
             d, p0, p1 = path_distance( r0, r1, r0.goal, r1.goal )
             if d < detection_range:
                 # sample waypoints from r0, r1 and measure d1, d2, d3, d4
-                samples  = np.empty( shape=(n_sample*2,  ), dtype=np.float64 )
+                samples  = np.empty( shape=(n_sample*2, 2), dtype=np.float64 )
                 features = np.empty( shape=(n_sample*2, 4), dtype=np.float64 )
                 samples[:n_sample], features[:n_sample] = sample_waypoint_features( r0.id, p0, p1, threshold=0.6, n_sample=n_sample )
                 samples[n_sample:], features[n_sample:] = sample_waypoint_features( r1.id, p1, p0, threshold=0.6, n_sample=n_sample )
@@ -198,7 +210,7 @@ if __name__ == '__main__':
                 yaw = polite.trajectory[polite.traj_idx-1][2]   # x, y, yaw
                 polite.move( wx, wy, yaw )
 
-        for idx, polite, (polite_goal, ttd) in zip( robot_ids[~available], robots[~available], info[~available] ):
+        for idx, polite, (polite_goal, ttd) in zip( robot_idx[~available], robots[~available], info[~available] ):
             d_nearest = np.inf
             for bold in robots[available]:
                 d, p_polite, p_bold = path_distance(polite, bold, polite_goal, bold.goal)
