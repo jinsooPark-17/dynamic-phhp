@@ -119,11 +119,16 @@ class AllinOne(object):
         except rospy.ServiceException as e:
             raise RuntimeError(f"{self.id}: {e}")
 
-    def make_plan(self, req):
+    def make_plan(self, start, goal: MoveBaseGoal):
         rospy.wait_for_service( os.path.join(self.id, "move_base", "NavfnROS", "make_plan") )
-        # rospy.wait_for_service( os.path.join(self.id, "move_base", "make_plan") )
+        plan_req = GetPlanRequest()
+        plan_req.start.header = goal.target_pose.header
+        plan_req.start.pose = start
+        plan_req.goal = goal.target_pose
+        plan_req.tolerance = 0.1
+
         try:
-            plan_msg = self.__make_plan_srv( req )
+            plan_msg = self.__make_plan_srv( plan_req )
             plan = np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.plan.poses])
             return plan
         except rospy.ServiceException as e:
@@ -150,7 +155,7 @@ class AllinOne(object):
 
         self.__pub_localize.publish(msg)
 
-    def dynamic_hallucinate(self, r, theta, t, radius=0.5):
+    def dynamic_hallucinate(self, r, theta, t, radius=-0.5):
         # r, theta, t, radius in [-1.0, 1.0]
         radius = radius+1.0             # (0.0, 2.0)
         r      = r*4.0 + 4.5 + radius   # (0.5, 8.5) + radius
@@ -296,12 +301,7 @@ class AllinOne(object):
             return
 
         # Request plan of robot
-        plan_req = GetPlanRequest()
-        plan_req.start.header = self.goal.target_pose.header
-        plan_req.goal = self.goal.target_pose
-        plan_req.start.pose = self.pose
-        plan_req.tolerance = 0.1
-        plan = self.make_plan(plan_req)
+        plan = self.make_plan( self.pose, self.goal )
         dist = np.cumsum( np.linalg.norm(plan[1:] - plan[:-1], axis=1) ) # monotonic increasing array
 
         # Check if opponent approaches within the detection range

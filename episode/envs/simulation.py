@@ -168,7 +168,7 @@ class I_Shaped_Hallway(Gazebo):
 
                 state = torch.concat([state, s])
                 action = torch.concat([action, a])
-        done[-1] = True
+        done[-1] = self.robot1.is_arrived()
         state = torch.concat([state, self.robot1.get_state()])
 
         return (state[:-1],     # state

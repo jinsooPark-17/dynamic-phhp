@@ -59,7 +59,7 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
 
     # Install Dynamic-PHHP dependencies (Python3)
     apt-get install -y python3-pip coreutils
-    pip3 install torch numpy pyYAML rospkg netifaces mpi4py matplotlib
+    pip3 install numpy torch gpytorch cmaes pyYAML rospkg netifaces mpi4py matplotlib
 
     rosdep init && rosdep update
     apt-get upgrade -y
