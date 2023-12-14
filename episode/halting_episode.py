@@ -1,6 +1,7 @@
 import os
 import torch
 import numpy as np
+import argparse
 import gpytorch
 from copy import deepcopy
 from math import pi
@@ -50,7 +51,6 @@ def reset_episode( robots, reset_poses, init_poses ):
                 break
         else:
             break
-    print("Robot moves to init_pose")
 
 def begin_episode( robots, reset_poses, init_poses, goal_poses, max_retry=10, timeout=60. ):
     for _ in range(max_retry):
@@ -104,21 +104,21 @@ def sample_waypoint_features(name, p0, p1, threshold=0.65, n_sample=800):
     # Sample available waypoints
     waypoint_point = np.argwhere( (grid_world > threshold) == True )
     sample_idx = rng.choice( waypoint_point.shape[0], n_sample, replace=False)
-    samples = waypoint_point[sample_idx]
+    samples = waypoint_point[sample_idx]    # y,x format
 
     # Calculate d3, d4
     disp_to_wall = samples[:, np.newaxis, :] - wall_point[np.newaxis, :, :]
     dist_to_wall = np.linalg.norm( disp_to_wall, axis=2 )
     w1 = disp_to_wall[np.arange(n_sample), np.argmin(dist_to_wall, axis=1), :]
-    d1 = np.linalg.norm( samples*resolution + origin - p0, axis=1 )
-    d2 = np.linalg.norm( samples*resolution + origin - p1, axis=1 )
     d3 = dist_to_wall.min(axis=1) * resolution
     for i in range( n_sample ):
         idx = np.argwhere( disp_to_wall[i].dot( w1[i] ) >= 0. )
         dist_to_wall[i, idx] = np.inf
     d4 = dist_to_wall.min(axis=1) * resolution
 
-    samples = samples * resolution + origin
+    samples = samples[:,::-1] * resolution + origin
+    d1 = np.linalg.norm( samples - p0, axis=1 )
+    d2 = np.linalg.norm( samples - p1, axis=1 )
 
     return samples, np.vstack((d1, d2, d3, d4)).T
 
@@ -140,13 +140,16 @@ def load_data(storage):
     return train_data['features'].float(), train_data['observations'].float()
 
 if __name__ == '__main__':
-    storage = '??.csv'
-    train_iter = 50
-    detection_range = 8.0
-    n_sample = 800
-    epsilon = 0.05
-    timeout_penalty = 60.0
-    reward_constant = 50.0
+    parser = argparse.ArgumentParser()
+    parser.add_argument("storage", type=str, help="Name of train data (.pt file)")
+    parser.add_argument("train_iter", type=int, default=50, help="Gaussian Process Regression training iteration")
+    parser.add_argument("detection_range", type=float, default=8.0, help="detection range of robots")
+    parser.add_argument("n_sample", type=int, default=800, help="Number of samples from visible area")
+    parser.add_argument("epsilon", type=float, default=0.05, help="Epsilon value of epsilon greedy algorithm")
+    parser.add_argument("timeout", type=float, default=60.0, help="Timeout of episode")
+    parser.add_argument("reward_constant", type=float, default=50.0, help="Constant to make successful episodic reward positive value")
+    args = parser.parse_args()
+
     robot_ids = np.array([ 'marvin', 'rob' ], dtype=str)
 
     env = Gazebo( )
@@ -156,7 +159,7 @@ if __name__ == '__main__':
     info = np.zeros((robot_ids.shape[0], 2), dtype=object)    # goal, TTD
 
     # Load Gaussian Process Regression model
-    train_x, train_y = load_data( storage )
+    train_x, train_y = load_data( args.storage )
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
     gpr = ExactGPModel(train_x, train_y, likelihood)
 
@@ -164,7 +167,7 @@ if __name__ == '__main__':
     gpr.train()
     optimizer = torch.optim.Adam( gpr.parameters(), lr=0.1 )
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, gpr)
-    for _ in range(train_iter):
+    for _ in range(args.train_iter):
         optimizer.zero_grad()
         output = gpr(train_x)
         loss = -mll(output, train_y)
@@ -178,7 +181,7 @@ if __name__ == '__main__':
     r1, p1, g1 = Pose( -2.0, 0.0,  pi), Pose(  -6.0, 0.0,  pi ), Pose( -22.0, 0.0,  pi )
 
     # Halting episode
-    begin_episode(robots=robots, reset_poses=[r0,r1], init_poses=[p0,p1], goal_poses=[g0,g1])
+    begin_episode(robots=robots, reset_poses=[r0,r1], init_poses=[p0,p1], goal_poses=[g0,g1], timeout=args.timeout)
     while not rospy.is_shutdown():
         # Termination condition: when all robots stopped
         if any([r.is_running() for r in robots]) is False:
@@ -187,21 +190,21 @@ if __name__ == '__main__':
         for r0, r1 in combinations( robots[available], 2 ):
             # if d_r0r1 < Detection_range
             d, p0, p1 = path_distance( r0, r1, r0.goal, r1.goal )
-            if d < detection_range:
+            if d < args.detection_range:
                 # sample waypoints from r0, r1 and measure d1, d2, d3, d4
-                samples  = np.empty( shape=(n_sample*2, 2), dtype=np.float64 )
-                features = np.empty( shape=(n_sample*2, 4), dtype=np.float64 )
-                samples[:n_sample], features[:n_sample] = sample_waypoint_features( r0.id, p0, p1, threshold=0.6, n_sample=n_sample )
-                samples[n_sample:], features[n_sample:] = sample_waypoint_features( r1.id, p1, p0, threshold=0.6, n_sample=n_sample )
+                samples  = np.empty( shape=(args.n_sample*2, 2), dtype=np.float64 )
+                features = np.empty( shape=(args.n_sample*2, 4), dtype=np.float64 )
+                samples[:args.n_sample], features[:args.n_sample] = sample_waypoint_features( r0.id, p0, p1, threshold=0.6, n_sample=args.n_sample )
+                samples[args.n_sample:], features[args.n_sample:] = sample_waypoint_features( r1.id, p1, p0, threshold=0.6, n_sample=args.n_sample )
 
-                mode = rng.choice(['explore', 'exploit'], p=[epsilon, 1-epsilon])
+                mode = rng.choice(['explore', 'exploit'], p=[args.epsilon, 1-args.epsilon])
                 if mode == 'explore':
-                    waypoint_idx = rng.choice( np.arange(n_sample*2) )
+                    waypoint_idx = rng.choice( np.arange(args.n_sample*2) )
                 else:
                     test_x = torch.from_numpy( features ).float()
                     reward_pred = likelihood( gpr( test_x ) ).sample()
                     waypoint_idx = reward_pred.argmax().item()
-                polite   = (r0 if waypoint_idx < n_sample else r1)
+                polite   = (r0 if waypoint_idx < args.n_sample else r1)
 
                 # Store information
                 polite_idx = np.where( robot_ids == polite.id )
@@ -212,7 +215,7 @@ if __name__ == '__main__':
                 # Move the polite robot to designated waypoint
                 wx, wy = samples[waypoint_idx]
                 yaw = polite.trajectory[polite.traj_idx-1][2]   # x, y, yaw
-                polite.move( wx, wy, yaw )
+                polite.move( wx, wy, yaw, timeout=args.timeout )
 
         for idx, polite, (polite_goal, ttd) in zip( robot_idx[~available], robots[~available], info[~available] ):
             if polite.is_running() is True:
@@ -223,11 +226,11 @@ if __name__ == '__main__':
                 d, _, _ = path_distance(polite, bold, polite_goal, bold.goal)
                 d_nearest = min(d_nearest, d)
 
-            if d_nearest > detection_range:
+            if d_nearest > args.detection_range:
                 x = polite_goal.target_pose.pose.position.x
                 y = polite_goal.target_pose.pose.position.y
                 yaw = quaternion_to_yaw( polite_goal.target_pose.pose.orientation )
-                polite.move( x, y, yaw )
+                polite.move( x, y, yaw, timeout=args.timeout )
                 polite.ttd = ttd
                 available[ idx ] = True
         rospy.sleep(0.05)
@@ -240,6 +243,6 @@ if __name__ == '__main__':
         reward -= r.ttd
         success *= r.is_arrived()
         print(f"\t{r.id}: {r.ttd:.2f} seconds")
-    reward += reward_constant - timeout_penalty*(not success)
+    reward += args.reward_constant - args.timeout*(not success)
     print(f"Episode reward: {reward}")
     print(f"Timeout: {not success}")
