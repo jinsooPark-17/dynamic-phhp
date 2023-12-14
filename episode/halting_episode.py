@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 import gpytorch
+from copy import deepcopy
 from math import pi
 from itertools import combinations
 from collections import namedtuple
@@ -69,14 +70,16 @@ def path_distance(r0, r1, g0, g1):
     plan0 = r0.make_plan( r0.pose, g0 )
     plan1 = r1.make_plan( r1.pose, g1 )
 
+    if plan0.size == 0 or plan1.size == 0:
+        return -1.0, None, None
     dist0 = np.linalg.norm( plan0 - plan1[0], axis=1 )
     dist1 = np.linalg.norm( plan1 - plan0[0], axis=1 )
+    idx0 = dist0.argmin()
+    idx1 = dist1.argmin()
 
-    idx0 = np.argwhere( dist0 < 0.5 ).squeeze()
-    idx1 = np.argwhere( dist1 < 0.5 ).squeeze()
-    d0 = (np.inf if idx0.size==0 else np.cumsum(np.linalg.norm( plan0[1:] - plan0[:-1] , axis=1 ))[idx0[0]-1])
-    d1 = (np.inf if idx0.size==0 else np.cumsum(np.linalg.norm( plan1[1:] - plan1[:-1] , axis=1 ))[idx1[0]-1])
-    return max(d0, d1), plan0[0], plan1[0]
+    d0 = (np.inf if dist0[idx0]>0.8 else np.cumsum(np.linalg.norm( plan0[1:] - plan0[:-1] , axis=1 ))[idx0-1])
+    d1 = (np.inf if dist1[idx1]>0.8 else np.cumsum(np.linalg.norm( plan1[1:] - plan1[:-1] , axis=1 ))[idx1-1])
+    return min(d0, d1), plan0[0], plan1[0]
 
 def sample_waypoint_features(name, p0, p1, threshold=0.65, n_sample=800):
     costmap_msg = rospy.wait_for_message( os.path.join(name, 'move_base', 'local_costmap', 'costmap'), OccupancyGrid )
@@ -142,6 +145,8 @@ if __name__ == '__main__':
     detection_range = 8.0
     n_sample = 800
     epsilon = 0.05
+    timeout_penalty = 60.0
+    reward_constant = 50.0
     robot_ids = np.array([ 'marvin', 'rob' ], dtype=str)
 
     env = Gazebo( )
@@ -165,6 +170,8 @@ if __name__ == '__main__':
         loss = -mll(output, train_y)
         loss.backward()
         optimizer.step()
+    likelihood.eval()
+    gpr.eval()
 
     # Define episode configuration
     r0, p0, g0 = Pose(-20.0, 0.0, 0.0), Pose( -16.0, 0.0, 0.0 ), Pose(   0.0, 0.0, 0.0 )
@@ -174,10 +181,7 @@ if __name__ == '__main__':
     begin_episode(robots=robots, reset_poses=[r0,r1], init_poses=[p0,p1], goal_poses=[g0,g1])
     while not rospy.is_shutdown():
         # Termination condition: when all robots stopped
-        for r in robots:
-            if r.is_running() is True:
-                break
-        else:
+        if any([r.is_running() for r in robots]) is False:
             break
 
         for r0, r1 in combinations( robots[available], 2 ):
@@ -194,7 +198,7 @@ if __name__ == '__main__':
                 if mode == 'explore':
                     waypoint_idx = rng.choice( np.arange(n_sample*2) )
                 else:
-                    test_x = torch.from_numpy( features )
+                    test_x = torch.from_numpy( features ).float()
                     reward_pred = likelihood( gpr( test_x ) ).sample()
                     waypoint_idx = reward_pred.argmax().item()
                 polite   = (r0 if waypoint_idx < n_sample else r1)
@@ -202,8 +206,8 @@ if __name__ == '__main__':
                 # Store information
                 polite_idx = np.where( robot_ids == polite.id )
                 available[polite_idx] = False
-                info[polite_idx, 0] = polite.goal
-                info[polite_idx, 1] = polite.ttd     # rospy.Time
+                info[polite_idx, 0] = deepcopy(polite.goal)
+                info[polite_idx, 1] = deepcopy(polite.ttd)     # rospy.Time
 
                 # Move the polite robot to designated waypoint
                 wx, wy = samples[waypoint_idx]
@@ -211,19 +215,31 @@ if __name__ == '__main__':
                 polite.move( wx, wy, yaw )
 
         for idx, polite, (polite_goal, ttd) in zip( robot_idx[~available], robots[~available], info[~available] ):
+            if polite.is_running() is True:
+                continue
+            
             d_nearest = np.inf
             for bold in robots[available]:
-                d, p_polite, p_bold = path_distance(polite, bold, polite_goal, bold.goal)
+                d, _, _ = path_distance(polite, bold, polite_goal, bold.goal)
                 d_nearest = min(d_nearest, d)
-            if (polite.is_running() is False) and ( d is np.inf ):
+
+            if d_nearest > detection_range:
                 x = polite_goal.target_pose.pose.position.x
                 y = polite_goal.target_pose.pose.position.y
                 yaw = quaternion_to_yaw( polite_goal.target_pose.pose.orientation )
                 polite.move( x, y, yaw )
                 polite.ttd = ttd
                 available[ idx ] = True
+        rospy.sleep(0.05)
 
     # End of episode
     print("End of episode")
+    reward = 0.0
+    success = True
     for r in robots:
+        reward -= r.ttd
+        success *= r.is_arrived()
         print(f"\t{r.id}: {r.ttd:.2f} seconds")
+    reward += reward_constant - timeout_penalty*(not success)
+    print(f"Episode reward: {reward}")
+    print(f"Timeout: {not success}")
