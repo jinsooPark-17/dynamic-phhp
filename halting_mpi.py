@@ -106,8 +106,8 @@ if __name__ == "__main__":
     train_y = torch.zeros((args.total_sample, ), dtype=torch.float32)
     for i in range(0, args.total_sample, num_node):
         # save train data as .pt file
-        if rank == ROOT:
-            torch.save(dict(features=train_x[:i,:], observations=train_y[:i]), TRAIN_STORAGE)
+        if rank == ROOT:    # if i==0, use dummy data!
+            torch.save(dict(features=train_x[:max(i,1),:], observations=train_y[:max(i,1)]), TRAIN_STORAGE)
             time.sleep(1.0) # Make sure train data is saved as file
         comm.Barrier()
 
@@ -119,7 +119,7 @@ if __name__ == "__main__":
         ep_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "python3", "episode/halting_episode.py",
                                     "--train_data_storage", f"{TRAIN_STORAGE}", "--train_iter", f"{args.train_iter}", "--epsilon", f"{epsilon}",
                                     "--detection_range", f"{detection_range}", "--n_sample", f"{args.n_sample}",
-                                    "--timeout", "60.0", "--reward_constant", f"{args.reward_constant}",
+                                    "--timeout", "200.0", "--reward_constant", f"{args.reward_constant}",
                                     "--result_data_storage", f"/tmp/{ID}.pt"], 
                                     stderr=subprocess.DEVNULL)
         time.sleep(5.0)
