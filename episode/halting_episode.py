@@ -162,7 +162,11 @@ if __name__ == '__main__':
     result = dict(
         p_bold=None,
         p_polite=None,
+        mode=None,
         waypoint=None,
+        waypoint_mean=None,
+        waypoint_sampled=None,
+        waypoint_std=None,
         features=None,
         ttd_polite=-1.0,
         halt_time=-1.0,
@@ -173,7 +177,7 @@ if __name__ == '__main__':
     )
 
     # Load Gaussian Process Regression model
-    train_x, train_y = load_data( args.train_storage )
+    train_x, train_y = load_data( args.train_data_storage )
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
     gpr = ExactGPModel(train_x, train_y, likelihood)
 
@@ -223,8 +227,12 @@ if __name__ == '__main__':
                     waypoint_idx = rng.choice( np.arange(args.n_sample*2) )
                 else:
                     test_x = torch.from_numpy( features ).float()
-                    reward_pred = likelihood( gpr( test_x ) ).sample()
-                    waypoint_idx = reward_pred.argmax().item()
+                    reward_pred = likelihood( gpr( test_x ) )
+                    reward_sample = reward_pred.sample()
+                    waypoint_idx = reward_sample.argmax().item()
+                    result['waypoint_mean'] = reward_pred.mean[waypoint_idx]
+                    result['waypoint_std'] = reward_pred.stddev[waypoint_idx]
+                    result['waypoint_sampled'] = reward_sample[waypoint_idx]
                 polite   = (r0 if waypoint_idx < args.n_sample else r1)
                 bold     = (r1 if waypoint_idx < args.n_sample else r0)
                 polite_idx = np.where( robot_ids == polite.id )
@@ -238,6 +246,7 @@ if __name__ == '__main__':
                 polite.move( wx, wy, yaw, timeout=args.timeout )
 
                 # Store information
+                result['mode']     = mode
                 result['p_polite'] = (p0 if waypoint_idx < args.n_sample else p1)
                 result['p_bold']   = (p1 if waypoint_idx < args.n_sample else p0)
                 result['waypoint'] = samples[waypoint_idx]
