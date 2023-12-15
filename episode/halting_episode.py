@@ -141,25 +141,39 @@ def load_data(storage):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("storage", type=str, help="Name of train data (.pt file)")
-    parser.add_argument("train_iter", type=int, default=50, help="Gaussian Process Regression training iteration")
-    parser.add_argument("detection_range", type=float, default=8.0, help="detection range of robots")
-    parser.add_argument("n_sample", type=int, default=800, help="Number of samples from visible area")
-    parser.add_argument("epsilon", type=float, default=0.05, help="Epsilon value of epsilon greedy algorithm")
-    parser.add_argument("timeout", type=float, default=60.0, help="Timeout of episode")
-    parser.add_argument("reward_constant", type=float, default=50.0, help="Constant to make successful episodic reward positive value")
+    parser.add_argument("--train_data_storage", type=str, help="Name of train data (.pt file)")
+    parser.add_argument("--result_data_storage", type=str, help="File to write result")
+    parser.add_argument("--train_iter", type=int, default=50, help="Gaussian Process Regression training iteration")
+    parser.add_argument("--epsilon", type=float, default=0.05, help="Epsilon value of epsilon greedy algorithm")
+    parser.add_argument("--detection_range", type=float, default=8.0, help="detection range of robots")
+    parser.add_argument("--n_sample", type=int, default=800, help="Number of samples from visible area")
+    parser.add_argument("--timeout", type=float, default=60.0, help="Timeout of episode")
+    parser.add_argument("--reward_constant", type=float, default=50.0, help="Constant to make successful episodic reward positive value")
     args = parser.parse_args()
 
-    robot_ids = np.array([ 'marvin', 'rob' ], dtype=str)
+    w_min = 1.20
 
     env = Gazebo( )
+    robot_ids = np.array([ 'marvin', 'rob' ], dtype=str)
     robot_idx = np.arange( robot_ids.shape[0] )
     robots = np.array( [AllinOne(id) for id in robot_ids] )
     available = np.full_like( robot_ids, fill_value=True, dtype=np.bool_ )
     info = np.zeros((robot_ids.shape[0], 2), dtype=object)    # goal, TTD
+    result = dict(
+        p_bold=None,
+        p_polite=None,
+        waypoint=None,
+        features=None,
+        ttd_polite=-1.0,
+        halt_time=-1.0,
+        ttd_bold=-1.0,
+        timeout_polite=False, 
+        timeout_bold=False,
+        reward=None, 
+    )
 
     # Load Gaussian Process Regression model
-    train_x, train_y = load_data( args.storage )
+    train_x, train_y = load_data( args.train_storage )
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
     gpr = ExactGPModel(train_x, train_y, likelihood)
 
@@ -181,6 +195,7 @@ if __name__ == '__main__':
     r1, p1, g1 = Pose( -2.0, 0.0,  pi), Pose(  -6.0, 0.0,  pi ), Pose( -22.0, 0.0,  pi )
 
     # Halting episode
+    halt_time = None
     begin_episode(robots=robots, reset_poses=[r0,r1], init_poses=[p0,p1], goal_poses=[g0,g1], timeout=args.timeout)
     while not rospy.is_shutdown():
         # Termination condition: when all robots stopped
@@ -197,6 +212,12 @@ if __name__ == '__main__':
                 samples[:args.n_sample], features[:args.n_sample] = sample_waypoint_features( r0.id, p0, p1, threshold=0.6, n_sample=args.n_sample )
                 samples[args.n_sample:], features[args.n_sample:] = sample_waypoint_features( r1.id, p1, p0, threshold=0.6, n_sample=args.n_sample )
 
+                criteria = np.maximum(features[:,2:].sum(axis=1), w_min)
+                features[:,0] /= args.detection_range
+                features[:,1] /= args.detection_range
+                features[:,2] /= criteria
+                features[:,3] /= criteria
+
                 mode = rng.choice(['explore', 'exploit'], p=[args.epsilon, 1-args.epsilon])
                 if mode == 'explore':
                     waypoint_idx = rng.choice( np.arange(args.n_sample*2) )
@@ -205,8 +226,7 @@ if __name__ == '__main__':
                     reward_pred = likelihood( gpr( test_x ) ).sample()
                     waypoint_idx = reward_pred.argmax().item()
                 polite   = (r0 if waypoint_idx < args.n_sample else r1)
-
-                # Store information
+                bold     = (r1 if waypoint_idx < args.n_sample else r0)
                 polite_idx = np.where( robot_ids == polite.id )
                 available[polite_idx] = False
                 info[polite_idx, 0] = deepcopy(polite.goal)
@@ -217,8 +237,15 @@ if __name__ == '__main__':
                 yaw = polite.trajectory[polite.traj_idx-1][2]   # x, y, yaw
                 polite.move( wx, wy, yaw, timeout=args.timeout )
 
+                # Store information
+                result['p_polite'] = (p0 if waypoint_idx < args.n_sample else p1)
+                result['p_bold']   = (p1 if waypoint_idx < args.n_sample else p0)
+                result['waypoint'] = samples[waypoint_idx]
+                result['features'] = features[waypoint_idx]
+
         for idx, polite, (polite_goal, ttd) in zip( robot_idx[~available], robots[~available], info[~available] ):
             if polite.is_running() is True:
+                halt_time = rospy.Time.now()
                 continue
             
             d_nearest = np.inf
@@ -230,19 +257,23 @@ if __name__ == '__main__':
                 x = polite_goal.target_pose.pose.position.x
                 y = polite_goal.target_pose.pose.position.y
                 yaw = quaternion_to_yaw( polite_goal.target_pose.pose.orientation )
+                result['halt_time'] = (rospy.Time.now() - halt_time).to_sec()
                 polite.move( x, y, yaw, timeout=args.timeout )
                 polite.ttd = ttd
                 available[ idx ] = True
         rospy.sleep(0.05)
 
     # End of episode
-    print("End of episode")
     reward = 0.0
     success = True
     for r in robots:
         reward -= r.ttd
         success *= r.is_arrived()
-        print(f"\t{r.id}: {r.ttd:.2f} seconds")
     reward += args.reward_constant - args.timeout*(not success)
-    print(f"Episode reward: {reward}")
-    print(f"Timeout: {not success}")
+
+    result['ttd_polite'] = polite.ttd
+    result['ttd_bold'] = bold.ttd
+    result['timeout_polite'] = polite.is_arrived()
+    result['timeout_bold'] =  bold.is_arrived()
+    result['reward'] = reward
+    torch.save(result, args.result_data_storage)
