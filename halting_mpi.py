@@ -4,20 +4,12 @@ import time
 import uuid
 import torch
 import numpy as np
-import random
 import mpi4py
+import pandas as pd
 mpi4py.rc.recv_mprobe = False
 import argparse
 import subprocess
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
-from math import pi
 from mpi4py import MPI
-from matplotlib.patches import Rectangle
-from scipy.ndimage.filters import gaussian_filter
-from episode.policy.policy import ActorCritic
-from rl.sac import ReplayBuffer, SAC
 from torch.utils.tensorboard import SummaryWriter
 
 def convert_sec(sec):
@@ -70,6 +62,7 @@ if __name__ == "__main__":
     MODEL_DIRECTORY = f"{WORK_DIRECTORY}/checkpoints/halting/{jobID}"
     DATA_DIRECTORY  = f"{WORK_DIRECTORY}/data/halting/{jobID}"
     TRAIN_STORAGE   = f"{DATA_DIRECTORY}/train.pt"
+    CSV_STORAGE     = f"{DATA_DIRECTORY}/result.csv"
 
     # Create directory if not exists
     if not os.path.exists(LOG_DIRECTORY):
@@ -128,49 +121,86 @@ if __name__ == "__main__":
         gc.collect()
 
         # Load episode result from file
-        data = torch.load(f"/tmp/{ID}.pt")
+        data_dict = torch.load(f"/tmp/{ID}.pt")
+        data = torch.zeros(23, dtype=torch.float32)
+        data[0] = (0.0 if data_dict['mode'] is 'exploit' else 1.0)
+        data[1,2,3,4] = data_dict['features']
+        data[5] = data_dict['reward']
+        data[ 6, 7] = data_dict['p_bold']
+        data[ 8, 9] = data_dict['p_polite']
+        data[10,11] = data_dict['waypoint']
+        data[12] = data_dict['success_polite']
+        data[13] = data_dict['ttd_polite']
+        data[14] = data_dict['halt_time']
+        data[15] = data_dict['success_bold']
+        data[16] = data_dict['ttd_bold']
+        data[17] = data_dict['computation_time']
+        data[18] = data_dict['waypoint_mean']
+        data[19] = data_dict['waypoint_std']
+        data[20] = data_dict['waypoint_sampled']
+        data[21] = (1.0 if local_rank==ROOT else 0.0)
+        data[22] = (local_rank % 6)
 
-logger.add_scalar("Episode reward", ep_rew, idx+size*ep_round)
+        # Collect data through MPI channel
+        data_buf = (torch.empty((size,22), dtype=torch.float32) if rank==ROOT else None)    # Use numpy format?
+        comm.Gather(data, data_buf, root=ROOT)
 
-            # Load episode result from file
-            data = torch.load(f"/tmp/{ID}.pt")
-            s, a, ns, r, d, traj = list(map(data.get, ["state", "action", "next_state", "reward", "done", "trajectory1"]))
-            ep_len = replay.store(state=s, action=a, next_state=ns, reward=r, done=d)
-            ep_steps = comm.allreduce( ep_len, op=MPI.SUM )
+        if rank==ROOT:
+            train_idx = torch.where(data_buf[:,21]>0.5, True, False)
+            train_x[i+num_node,:] = data_buf[train_idx, 1:5]
+            train_y[i+num_node] = data_buf[train_idx, 5]
 
-            # Store remain distance-reward pair
-            dist_reward += [[np.linalg.norm(traj[1:,:2] - traj[:-1,:2], axis=1).sum(), r.sum()]]
+            print(data_buf)
+            print(f'train_x:\n\t{train_x[:i+num_node]}')
+            print(f'train_y:\n\t{train_y[:i+num_node]}')
 
-            # Log episode reward to tensorboard
-            ep_rew_buf = (torch.empty(size) if rank==ROOT else None)
-            comm.Gather(r.sum(), ep_rew_buf, root=ROOT)
-            if rank == ROOT:
-                for idx, ep_rew in enumerate(ep_rew_buf):
-                    logger.add_scalar("Episode reward", ep_rew, idx+size*ep_round)
-                ep_round += 1
+            # save new episodic data to csv file
+            df = pd.DataFrame(data_buf.numpy(), columns=[
+                'mode', 'x1', 'x2', 'x3', 'x4', 'reward',
+                'x_bold', 'y_bold', 'x_polite', 'y_polite', 'x_waypoint', 'y_waypoint',
+                'success_polite', 'TTD_polite', 'TTD_halt', 'success_bold', 'TTD_bold',
+                't_compute', 'waypoint_mean', 'waypoint_std', 'waypoint_sampled', 'is_train_sample', 'env_setup'
+            ])
+            if not os.path.exists(CSV_STORAGE):
+                df.to_csv(CSV_STORAGE, index=False, mode='w', header=True)
+            else:
+                df.to_csv(CSV_STORAGE, index=False, mode='a', header=False)
 
-            if total_steps > args.update_after:
-                start_time = time.time()
-                info = np.empty((ep_steps, 2), dtype=np.float32)
-                for k in range(ep_steps):
-                    q_info, pi_info, t_comm = sac.update_mpi(batch=replay.sample_batch(LOCAL_BATCH_SIZE), comm=comm)
-                    t_network += t_comm
-                    # log q1 value to tensorboard
-                    info[k,0] = q_info["LossQ"]
-                    info[k,1] = pi_info["LossPi"]
-                t_train += time.time() - start_time
+            # Log to tensorboard
+            train_samples = data_buf[train_idx, :]
 
-                # Now log information to tensorboard
-                avg_info = (np.zeros((size, ep_steps, 2), dtype=np.float32) if rank==ROOT else None)
-                comm.Gather(info, avg_info, root=ROOT)
-                if rank == ROOT:
-                    avg_info = avg_info.mean(axis=0)
-                    for k in range(ep_steps):
-                        logger.add_scalar("Loss/Q", info[k,1], total_steps+k)
-                        logger.add_scalar("Loss/PI", info[k,1], total_steps+k)
-            step += ep_steps
-            total_steps += ep_steps
-
-    if rank == ROOT:
-        logger.close()
+            ## train info
+            logger.add_scalar("computation_time", data_buf[:,17].mean().item(), i)
+            for k, (reward, ttd_bold, ttd_polite, ttd_halt) in enumerate(train_samples[:,[5,16,13,14]]):
+                logger.add_scalar(f"TRAIN/reward/{'-'.join(args.base_system)}", reward, i+k)
+                logger.add_scalar(f"TRAIN/TTD/{'-'.join(args.base_system)}", {"TTD_bold": ttd_bold,
+                                                                              "TTD_polite": ttd_polite,
+                                                                              "TTD_halt": ttd_halt}, i+k)
+            ## test info
+            eval_samples = data_buf[~train_idx, :]
+            logger.add_scalars("TEST/reward", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 5].mean().item()})
+            logger.add_scalars("TEST/TTD/polite", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 13].mean().item()})
+            logger.add_scalars("TEST/TTD/halt", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 14].mean().item()})
+            logger.add_scalars("TEST/TTD/bold", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 16].mean().item()})
+        comm.Barrier()
     os.system(f"singularity instance stop {ID} > /dev/null 2>&1")

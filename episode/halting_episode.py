@@ -224,7 +224,6 @@ if __name__ == '__main__':
                 features[:,2] /= criteria
                 features[:,3] /= criteria
 
-                polite.stop()
                 mode = rng.choice(['explore', 'exploit'], p=[args.epsilon, 1-args.epsilon])
                 if mode == 'explore':
                     waypoint_idx = rng.choice( np.arange(args.n_sample*2) )
@@ -246,6 +245,7 @@ if __name__ == '__main__':
                 # Move the polite robot to designated waypoint
                 wx, wy = samples[waypoint_idx]
                 yaw = polite.trajectory[polite.traj_idx-1][2]   # x, y, yaw
+                polite.stop()
                 polite.move( wx, wy, yaw, timeout=args.timeout )
 
                 # Store information
