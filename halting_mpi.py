@@ -40,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--epsilon", type=float, default=0.05)
     parser.add_argument("--detection_range", type=float, default=8.0)
     parser.add_argument("--n_sample", type=int, default=800)
-    parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--timeout", type=float, default=200.0)
     parser.add_argument("--reward_constant", type=float, default=60.0, help="Constant to make successful episode reward positive.")
     args = parser.parse_args()
 
@@ -65,12 +65,14 @@ if __name__ == "__main__":
     CSV_STORAGE     = f"{DATA_DIRECTORY}/result.csv"
 
     # Create directory if not exists
-    if not os.path.exists(LOG_DIRECTORY):
-        os.makedirs(LOG_DIRECTORY)
-    if not os.path.exists(MODEL_DIRECTORY):
-        os.makedirs(MODEL_DIRECTORY)
-    if not os.path.exists(DATA_DIRECTORY):
-        os.makedirs(DATA_DIRECTORY)
+    if rank==ROOT:
+        if not os.path.exists(LOG_DIRECTORY):
+            os.makedirs(LOG_DIRECTORY)
+        if not os.path.exists(MODEL_DIRECTORY):
+            os.makedirs(MODEL_DIRECTORY)
+        if not os.path.exists(DATA_DIRECTORY):
+            os.makedirs(DATA_DIRECTORY)
+    comm.Barrier()
 
     # Log hyper-parameters to tensorboard
     logger = (SummaryWriter(log_dir=LOG_DIRECTORY) if rank==ROOT else None)
@@ -112,7 +114,7 @@ if __name__ == "__main__":
         ep_proc = subprocess.Popen(["singularity", "run", f"instance://{ID}", "python3", "episode/halting_episode.py",
                                     "--train_data_storage", f"{TRAIN_STORAGE}", "--train_iter", f"{args.train_iter}", "--epsilon", f"{epsilon}",
                                     "--detection_range", f"{detection_range}", "--n_sample", f"{args.n_sample}",
-                                    "--timeout", "200.0", "--reward_constant", f"{args.reward_constant}",
+                                    "--timeout", f"{args.timeout}", "--reward_constant", f"{args.reward_constant}",
                                     "--result_data_storage", f"/tmp/{ID}.pt"], 
                                     stderr=subprocess.DEVNULL)
         time.sleep(5.0)
@@ -122,37 +124,34 @@ if __name__ == "__main__":
 
         # Load episode result from file
         data_dict = torch.load(f"/tmp/{ID}.pt")
-        data = torch.zeros(23, dtype=torch.float32)
-        data[0] = (0.0 if data_dict['mode'] is 'exploit' else 1.0)
-        data[1,2,3,4] = data_dict['features']
+        data = np.zeros(23, dtype=np.float32)
+        data[0] = (0.0 if data_dict['mode'] == 'exploit' else 1.0)
+        data[1:5] = data_dict['features']
         data[5] = data_dict['reward']
-        data[ 6, 7] = data_dict['p_bold']
-        data[ 8, 9] = data_dict['p_polite']
-        data[10,11] = data_dict['waypoint']
+        data[6:8] = data_dict['p_bold']
+        data[8:10] = data_dict['p_polite']
+        data[10:12] = data_dict['waypoint']
         data[12] = data_dict['success_polite']
         data[13] = data_dict['ttd_polite']
         data[14] = data_dict['halt_time']
         data[15] = data_dict['success_bold']
         data[16] = data_dict['ttd_bold']
         data[17] = data_dict['computation_time']
-        data[18] = data_dict['waypoint_mean']
-        data[19] = data_dict['waypoint_std']
-        data[20] = data_dict['waypoint_sampled']
+        data[18] = data_dict['waypoint_mean'].detach().item()
+        data[19] = data_dict['waypoint_std'].detach().item()
+        data[20] = data_dict['waypoint_sampled'].item()
         data[21] = (1.0 if local_rank==ROOT else 0.0)
         data[22] = (local_rank % 6)
 
         # Collect data through MPI channel
-        data_buf = (torch.empty((size,22), dtype=torch.float32) if rank==ROOT else None)    # Use numpy format?
+        if rank==ROOT:
+            data_buf = np.empty((size,data.shape[0]), dtype=np.float32)
         comm.Gather(data, data_buf, root=ROOT)
 
         if rank==ROOT:
-            train_idx = torch.where(data_buf[:,21]>0.5, True, False)
-            train_x[i+num_node,:] = data_buf[train_idx, 1:5]
+            train_idx = np.where(data_buf[:,21]>0.5, True, False)
+            train_x[i+num_node,:] = torch.from_numpy(data_buf[train_idx, 1:5]).float()
             train_y[i+num_node] = data_buf[train_idx, 5]
-
-            print(data_buf)
-            print(f'train_x:\n\t{train_x[:i+num_node]}')
-            print(f'train_y:\n\t{train_y[:i+num_node]}')
 
             # save new episodic data to csv file
             df = pd.DataFrame(data_buf.numpy(), columns=[
@@ -178,29 +177,29 @@ if __name__ == "__main__":
                                                                               "TTD_halt": ttd_halt}, i+k)
             ## test info
             eval_samples = data_buf[~train_idx, :]
-            logger.add_scalars("TEST/reward", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 5].mean().item(),
-                                               '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 5].mean().item(),
-                                               '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 5].mean().item(),
-                                               '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 5].mean().item(),
-                                               '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 5].mean().item(),
-                                               '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 5].mean().item()})
-            logger.add_scalars("TEST/TTD/polite", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 13].mean().item(),
-                                                   '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 13].mean().item(),
-                                                   '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 13].mean().item(),
-                                                   '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 13].mean().item(),
-                                                   '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 13].mean().item(),
-                                                   '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 13].mean().item()})
-            logger.add_scalars("TEST/TTD/halt", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 14].mean().item(),
-                                                 '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 14].mean().item(),
-                                                 '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 14].mean().item(),
-                                                 '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 14].mean().item(),
-                                                 '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 14].mean().item(),
-                                                 '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 14].mean().item()})
-            logger.add_scalars("TEST/TTD/bold", {'-'.join(system_setup[0]): eval_samples[torch.where(eval_samples[:,22]==0, True, False), 16].mean().item(),
-                                                 '-'.join(system_setup[1]): eval_samples[torch.where(eval_samples[:,22]==1, True, False), 16].mean().item(),
-                                                 '-'.join(system_setup[2]): eval_samples[torch.where(eval_samples[:,22]==2, True, False), 16].mean().item(),
-                                                 '-'.join(system_setup[3]): eval_samples[torch.where(eval_samples[:,22]==3, True, False), 16].mean().item(),
-                                                 '-'.join(system_setup[4]): eval_samples[torch.where(eval_samples[:,22]==4, True, False), 16].mean().item(),
-                                                 '-'.join(system_setup[5]): eval_samples[torch.where(eval_samples[:,22]==5, True, False), 16].mean().item()})
+            logger.add_scalars("TEST/reward", {'-'.join(system_setup[0]): eval_samples[np.where(eval_samples[:,22]==0, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[1]): eval_samples[np.where(eval_samples[:,22]==1, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[2]): eval_samples[np.where(eval_samples[:,22]==2, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[3]): eval_samples[np.where(eval_samples[:,22]==3, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[4]): eval_samples[np.where(eval_samples[:,22]==4, True, False), 5].mean().item(),
+                                               '-'.join(system_setup[5]): eval_samples[np.where(eval_samples[:,22]==5, True, False), 5].mean().item()})
+            logger.add_scalars("TEST/TTD/polite", {'-'.join(system_setup[0]): eval_samples[np.where(eval_samples[:,22]==0, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[1]): eval_samples[np.where(eval_samples[:,22]==1, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[2]): eval_samples[np.where(eval_samples[:,22]==2, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[3]): eval_samples[np.where(eval_samples[:,22]==3, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[4]): eval_samples[np.where(eval_samples[:,22]==4, True, False), 13].mean().item(),
+                                                   '-'.join(system_setup[5]): eval_samples[np.where(eval_samples[:,22]==5, True, False), 13].mean().item()})
+            logger.add_scalars("TEST/TTD/halt", {'-'.join(system_setup[0]): eval_samples[np.where(eval_samples[:,22]==0, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[1]): eval_samples[np.where(eval_samples[:,22]==1, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[2]): eval_samples[np.where(eval_samples[:,22]==2, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[3]): eval_samples[np.where(eval_samples[:,22]==3, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[4]): eval_samples[np.where(eval_samples[:,22]==4, True, False), 14].mean().item(),
+                                                 '-'.join(system_setup[5]): eval_samples[np.where(eval_samples[:,22]==5, True, False), 14].mean().item()})
+            logger.add_scalars("TEST/TTD/bold", {'-'.join(system_setup[0]): eval_samples[np.where(eval_samples[:,22]==0, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[1]): eval_samples[np.where(eval_samples[:,22]==1, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[2]): eval_samples[np.where(eval_samples[:,22]==2, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[3]): eval_samples[np.where(eval_samples[:,22]==3, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[4]): eval_samples[np.where(eval_samples[:,22]==4, True, False), 16].mean().item(),
+                                                 '-'.join(system_setup[5]): eval_samples[np.where(eval_samples[:,22]==5, True, False), 16].mean().item()})
         comm.Barrier()
     os.system(f"singularity instance stop {ID} > /dev/null 2>&1")
