@@ -14,7 +14,14 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     export ROS_DISTRO=melodic
     export DEBIAN_FRONTEND=noninteractive
 
-    apt-get update && apt-get install -y gnupg apt-utils curl nano vim tmux python-pip uuid
+    # Install Python3.7.5
+    apt update && apt-get update && apt install -y python3.7-dev
+
+    # Install python modules
+    apt-get install -y python-pip python3-pip coreutils
+    python3.7 -m pip install numpy matplotlib scipy pandas torch gpytorch cmaes
+
+    apt-get update && apt-get install -y gnupg apt-utils curl nano vim tmux uuid
     echo 'deb http://packages.ros.org/ros/ubuntu bionic main' > /etc/apt/sources.list.d/ros-latest.list
     curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add -
 
@@ -57,15 +64,7 @@ From: tacc/tacc-ubuntu18-mvapich2.3-ib:latest
     catkin config --init
     bash -c "source /opt/ros/melodic/setup.bash; catkin build -j6"  # Use -j2 if machine is slow
 
-    # Install python3.7.5 for A40 GPUs
-    apt-get install -y software-properties-common python3-pip coreutils
-    add-apt-repository -y ppa:deafsnakes/ppa && apt-get update
-    apt install -y python3.7-dev
-
-    python3.7 -m pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
-    python3.7 -m pip install gpytorch cmaes
-    python3.7 -m pip install numpy matplotlib scipy pandas pyYAML rospkg netifaces mpi4py 
-
+    python3.7 -m pip install  rospkg pyYAML netifaces mpi4py
     rosdep init && rosdep update
     apt-get upgrade -y
 
