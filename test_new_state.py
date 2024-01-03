@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from copy import deepcopy
+from math import sin, cos, atan2
 from skimage import feature
 
 import rospy
@@ -12,7 +13,7 @@ def quaternion_to_yaw(q):
     # roll = atan2( 2.0*(q.w*q.x + q.y*q.z), 1.0 - 2.0*(q.x*q.x + q.y*q.y) )
     # pitch = 2.0 * atan2(sqrt(1.0 + 2.0*(q.w*q.y - q.x*q.z)), sqrt(1.0 - 2.0*(q.w*q.y - q.x*q.z))) - PI/2.0
     # pitch = arcsin( 2.0*(q.w*q.y - q.x*q.z) )
-    yaw = np.arctan2(2.0*(q.w*q.z+q.x*q.y), 1.0-2.0*(q.y*q.y+q.z*q.z))
+    yaw = atan2(2.0*(q.w*q.z+q.x*q.y), 1.0-2.0*(q.y*q.y+q.z*q.z))
     return yaw
 
 class Costmap:
@@ -23,25 +24,14 @@ class Costmap:
         self.origin = np.array([costmap_msg.info.origin.position.x, costmap_msg.info.origin.position.y])
         self.costmap = np.array(costmap_msg.data, dtype=np.float64).reshape(self.w, self.h) / 100.
 
-        # Extract wall information from costmap
-        self.edge = feature.canny(self.costmap, sigma=sigma)
-        self.wall_xy = np.argwhere(self.edge == 1.0)
-        self.wall_index = self.wall_xy.dot([1, self.w])
-
-
-
 class Agent:
     def __init__(self, id):
         self.__id = id
-        self.amcl = None
         self.odom = None
-        self.odom_amcl = None
-
         self.theta = None
         self.raw_scan = None
         self.hal_scan = None
 
-        self.__amcl_cb = rospy.Subscriber(os.path.join(id, 'amcl_pose'), PoseWithCovarianceStamped, self.__amcl_callback)
         self.__odom_cb = rospy.Subscriber(os.path.join(id, 'odom'), Odometry, self.__odom_callback)
         self.__raw_scan_cb = rospy.Subscriber(os.path.join(id, 'scan_filtered'), LaserScan, self.__raw_scan_callback)
         self.__hal_scan_cb = rospy.Subscriber(os.path.join(id, 'scan_hallucinated'), LaserScan, self.__hal_scan_callback)
@@ -50,12 +40,10 @@ class Agent:
         self.map = Costmap(rospy.wait_for_message(os.path.join(id, 'move_base', 'global_costmap', 'costmap'), OccupancyGrid))
 
     # Define callbacks
-    def __amcl_callback(self, amcl_msg):
-        self.amcl = amcl_msg.pose.pose          # position, orientation
-        self.odom_amcl = deepcopy(self.odom)    # odom position at given AMCL message
     def __odom_callback(self, odom_msg):
         self.odom = odom_msg.pose.pose  # position, orientation
     def __raw_scan_callback(self, scan_msg):
+        """range_min, range_max"""
         if self.theta is None:
             self.theta = np.linspace(scan_msg.angle_min, scan_msg.angle_max, len(scan_msg.ranges))
         self.raw_scan = scan_msg.ranges
@@ -63,15 +51,33 @@ class Agent:
         self.hal_scan = scan_msg.ranges
 
     def scan_to_pointcloud(self, scan):
-        # 1. find sensor origin: amcl -> odom -> sensor (0.15875m to x-axis)
-        
-        return
+        # Change to use TF when deploy with real BWIbots.
+        # Launch python3 node that accept state message and return action.
+        # 1. find sensor origin: odom -> sensor (0.15875m to x-axis)
+        x, y = self.odom.position.x, self.odom.position.y
+        yaw = quaternion_to_yaw(self.odom.orientation)
 
-"""
-range_min
-range_max
-"""
+        dx = 0.15875    # displacement of sensor
+        sensor_x, sensor_y = x+dx*cos(yaw), y+dx*sin(yaw)
+        scan_x = sensor_x + scan * np.cos(self.theta+yaw)
+        scan_y = sensor_y + scan * np.sin(self.theta+yaw)
 
-odom_msg = rospy.wait_for_message('/marvin/odom', Odometry)
-odom = odom_msg.pose.pose.position
-yaw = quat2yaw(odom_msg.pose.pose.orientation)
+        # Coordinate to index
+        x_idx = int((scan_x - self.map.origin[0]) / self.map.resolution)
+        y_idx = int((scan_y - self.map.origin[1]) / self.map.resolution)
+
+        return x_idx, y_idx
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+    rospy.init_node('dev_state', anonymous=True)
+    
+    rospy.sleep(0.5)
+    marvin = Agent('marvin')
+    rospy.sleep(0.5)
+
+    x_idx, y_idx = marvin.scan_to_pointcloud( marvin.raw_scan )
+    img = marvin.map.costmap
+    img[x_idx, y_idx] = 0.5
+
+    plt.imsave('map_with_scan.png', img)
