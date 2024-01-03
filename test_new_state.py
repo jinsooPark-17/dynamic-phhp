@@ -27,8 +27,12 @@ class Costmap:
 class Agent:
     def __init__(self, id):
         self.__id = id
+        # pre-define scan related variables
+        scan_msg = rospy.wait_for_message(os.path.join(id, 'scan_filtered'), LaserScan)
         self.odom = None
-        self.theta = None
+        self.theta = np.linspace(scan_msg.angle_min, scan_msg.angle_max, len(scan_msg.ranges))
+        self.range_max = scan_msg.range_max
+        self.range_min = scan_msg.range_min
         self.raw_scan = None
         self.hal_scan = None
 
@@ -43,9 +47,6 @@ class Agent:
     def __odom_callback(self, odom_msg):
         self.odom = odom_msg.pose.pose  # position, orientation
     def __raw_scan_callback(self, scan_msg):
-        """range_min, range_max"""
-        if self.theta is None:
-            self.theta = np.linspace(scan_msg.angle_min, scan_msg.angle_max, len(scan_msg.ranges))
         self.raw_scan = scan_msg.ranges
     def __hal_scan_callback(self, scan_msg):
         self.hal_scan = scan_msg.ranges
@@ -63,10 +64,15 @@ class Agent:
         scan_y = sensor_y + scan * np.sin(self.theta+yaw)
 
         # Coordinate to index
-        x_idx = int((scan_x - self.map.origin[0]) / self.map.resolution)
-        y_idx = int((scan_y - self.map.origin[1]) / self.map.resolution)
+        valid_idx = np.isfinite(scan_x + scan_y)
+        x_idx = ((scan_x - self.map.origin[0]) / self.map.resolution).astype(np.int)
+        y_idx = ((scan_y - self.map.origin[1]) / self.map.resolution).astype(np.int)
+        uncharted = (self.map.costmap[x_idx[valid_idx], y_idx[valid_idx]] > 0.99)
+        state = np.zeros_like(scan)
+        # state[valid_idx][uncharted] = (scan[valid_idx][uncharted]-self.range_min) /(self.range_max-self.range_min) 
+        state[valid_idx][uncharted] = scan[valid_idx][uncharted]
 
-        return x_idx, y_idx
+        return state, scan
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -76,8 +82,7 @@ if __name__ == '__main__':
     marvin = Agent('marvin')
     rospy.sleep(0.5)
 
-    x_idx, y_idx = marvin.scan_to_pointcloud( marvin.raw_scan )
-    img = marvin.map.costmap
-    img[x_idx, y_idx] = 0.5
-
-    plt.imsave('map_with_scan.png', img)
+    state, scan = marvin.scan_to_pointcloud( marvin.raw_scan )
+    plt.plot(scan, c='k')
+    plt.plot(state, c='r')
+    plt.savefig('new_info.png')
