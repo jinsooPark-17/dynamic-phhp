@@ -17,11 +17,12 @@ def quaternion_to_yaw(q):
     return yaw
 
 class Movebase:
-    def __init__(self, id, map_frame):
+    def __init__(self, id, map_frame='level_mux_map'):
         self.id = id
         self.ttd = None
         self.goal = None
-        self.__map_frame = os.path.join(id, 'level_mux_map')
+        self.pose = None
+        self.__map_frame = os.path.join(id, map_frame)
 
         # Define move_base parameters
         self.__move_base = SimpleActionClient(os.path.join(self.id, 'move_base'), MoveBaseAction)
@@ -36,13 +37,6 @@ class Movebase:
 
         # Define subscriber
         # self.__sub_odom = rospy.
-
-    def clear_costmap(self):
-        rospy.wait_for_service( os.path.join(self.id, "move_base", "clear_costmaps") )
-        try:
-            self.__clear_costmap_srv()
-        except rospy.ServiceException as e:
-            raise RuntimeError("{}: {}".format(self.id, e))
 
     def localize(self, x, y, yaw, var=0.01):
         msg = PoseWithCovarianceStamped()
@@ -64,10 +58,16 @@ class Movebase:
         for _ in range(10):
             self.__pub_localize.publish(msg)
             rospy.sleep(0.01)
+        self.pose = msg.pose.pose
+    def clear_costmap(self):
+        rospy.wait_for_service( os.path.join(self.id, "move_base", "clear_costmaps") )
+        try:
+            self.__clear_costmap_srv()
+        except rospy.ServiceException as e:
+            raise RuntimeError("{}: {}".format(self.id, e))
 
     def move(self, x, y, yaw, timeout=60.0):
-        self.ttd = rospy.Time.now()
-
+        self.pose = None
         self.goal = MoveBaseGoal()
         self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
         self.goal.target_pose.header.frame_id = self.__map_frame
@@ -82,16 +82,16 @@ class Movebase:
             feedback_cb=self.feedback_cb, 
             done_cb=self.done_cb
         )
-
     def move_and_wait(self, x, y, yaw):
         self.move(x, y, yaw, timeout=9999.9)
         self.__move_base.wait_for_result()
-
     def resume(self, timeout=30.0):
         if self.goal is None:
             print("{}: ERROR! no previous goal found.".format(self.id))
             return
-        # change timeout value
+
+        # Change timeout value
+        self.pose = None
         self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
         self.__move_base.send_goal(
             self.goal, 
@@ -99,30 +99,19 @@ class Movebase:
             feedback_cb=self.feedback_cb, 
             done_cb=self.done_cb
         )
-
     def wait_for_result(self):
         self.__move_base.wait_for_result()
+    def stop(self):
+        self.__move_base.cancel_all_goals()
 
     def active_cb(self):
-        print(f"Active callback initiated: {(rospy.Time.now()-self.ttd).to_sec()}")
-
+        self.ttd = rospy.Time.now()
     def feedback_cb(self, feedback):
         if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
             self.stop()
-
-        print(f"Feedback callback initiated: {(rospy.Time.now()-self.ttd).to_sec()}")
-        print(f"Current location: ({feedback.base_position.pose.position.x:.2f},{feedback.base_position.pose.position.y:.2f})")
-        print(f"\tget_result: {self.__move_base.get_result()}")
-        print(f"\tget_state: {self.__move_base.get_state()}")
-        print(f"\tget_goal_status_text: {self.__move_base.get_goal_status_text()}")
-
+        self.pose = feedback.base_position.pose
     def done_cb(self, state, result):
-        print(f"Done callback initiated: {(rospy.Time.now()-self.ttd).to_sec()}")
-        print(f"state: {state}")
-        print(f"result: {result}")
-
-    def stop(self):
-        self.__move_base.cancel_all_goals()
+        self.ttd = (rospy.Time.now() - self.ttd).to_sec()
 
     def is_running(self):
         if self.__move_base.get_result() is None:
@@ -134,20 +123,52 @@ class Movebase:
     def is_arrived(self):
         return (self.__move_base.get_state() == GoalStatus.SUCCEEDED)
 
+import matplotlib.pyplot as plt
+class Agent(Movebase):
+    def __init__(self, id, map_frame='level_mux_map'):
+        super().__init__(id, map_frame)
+
+        # Define scan related variables
+        sample_scan_msg = rospy.wait_for_message(
+            os.path.join(id, 'scan_filtered'), 
+            LaserScan
+        )
+        self.theta = np.linspace(sample_scan_msg.angle_min, sample_scan_msg.angle_max, len(sample_scan_msg.ranges))[::-1]
+        self.raw_scan = None
+
+        self.__sub_raw_scan = rospy.Subscriber(
+            os.path.join(id, 'scan_filtered'),
+            LaserScan,
+            self.__raw_scan_cb
+        )
+        plt.figure()
+        plt.xlim(-25.0, 5.0)
+        plt.ylim( -1.0, 1.0)
+
+    def __raw_scan_cb(self, scan_msg):
+        sx, sy = self.scan_to_global_pointcloud(scan_msg.ranges)
+        plt.scatter(sx, sy, c='k', s=1)
+
+    def scan_to_global_pointcloud(self, scan):
+        dx = 0.15875
+        yaw = quaternion_to_yaw(self.pose.orientation)
+        sensor_x = self.pose.position.x + dx*cos(yaw)
+        sensor_y = self.pose.position.y + dx*sin(yaw)
+
+        scan_x = sensor_x + scan * np.cos(self.theta+yaw)
+        scan_y = sensor_y + scan * np.sin(self.theta+yaw)
+        finite_idx = np.isfinite(scan_x) * np.isfinite(scan_y)
+
+        return scan_x[finite_idx], scan_y[finite_idx]
 
 if __name__ == '__main__':
     rospy.init_node('dev_agent', anonymous=True)
+    rospy.sleep(1.0)
     
     marvin = Movebase('marvin')
-    rospy.sleep(0.5)
 
     print("Test move function")
-    marvin.move(-5.0, 0., np.pi, timeout=5.0)
-    marvin.wait_for_result()
-
-    print("Test resume function")
-    marvin.resume()
-    marvin.wait_for_result()
-
-    print("Test move_and_wait function")
-    marvin.move_and_wait(0.0, 0.0, 0.0)
+    marvin.move(-5.0, 0., np.pi, timeout=60.0)
+    while not marvin.is_arrived():
+        rospy.sleep(0.01)
+    plt.savefig('scan_history.png')
