@@ -17,10 +17,11 @@ def quaternion_to_yaw(q):
     return yaw
 
 class Movebase:
-    def __init__(self, id):
+    def __init__(self, id, map_frame):
         self.id = id
         self.ttd = None
         self.goal = None
+        self.__map_frame = os.path.join(id, 'level_mux_map')
 
         # Define move_base parameters
         self.__move_base = SimpleActionClient(os.path.join(self.id, 'move_base'), MoveBaseAction)
@@ -43,10 +44,10 @@ class Movebase:
         except rospy.ServiceException as e:
             raise RuntimeError("{}: {}".format(self.id, e))
 
-    def localize(self, x, y, yaw, var=0.01, map_frame='level_mux_map'):
+    def localize(self, x, y, yaw, var=0.01):
         msg = PoseWithCovarianceStamped()
         msg.header.stamp = rospy.Time.now()
-        msg.header.frame_id = os.path.join(self.id, map_frame)
+        msg.header.frame_id = self.__map_frame
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
         msg.pose.pose.orientation.z = sin(yaw/2.)
@@ -68,7 +69,8 @@ class Movebase:
         self.ttd = rospy.Time.now()
 
         self.goal = MoveBaseGoal()
-        self.goal.target_pose.header = rospy.Time.now() + rospy.Duration(timeout)
+        self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
+        self.goal.target_pose.header.frame_id = self.__map_frame
         self.goal.target_pose.pose.position.x = x
         self.goal.target_pose.pose.position.y = y
         self.goal.target_pose.pose.orientation.z = sin(yaw/2.)
@@ -82,21 +84,15 @@ class Movebase:
         )
 
     def move_and_wait(self, x, y, yaw):
-        self.goal = MoveBaseGoal()
-        self.goal.target_pose.header = rospy.Time.now() + rospy.Duration(3600)  # timeout after 1 hour
-        self.goal.target_pose.pose.position.x = x
-        self.goal.target_pose.pose.position.y = y
-        self.goal.target_pose.pose.orientation.z = sin(yaw/2.)
-        self.goal.target_pose.pose.orientation.w = cos(yaw/2.)
+        self.move(x, y, yaw, timeout=9999.9)
+        self.__move_base.wait_for_result()
 
-        self.__move_base.send_goal_and_wait(
-            self.goal, 
-            active_cb=self.active_cb, 
-            feedback_cb=self.feedback_cb, 
-            done_cb=self.done_cb
-        )
-
-    def resume(self):
+    def resume(self, timeout=30.0):
+        if self.goal is None:
+            print("{}: ERROR! no previous goal found.".format(self.id))
+            return
+        # change timeout value
+        self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
         self.__move_base.send_goal(
             self.goal, 
             active_cb=self.active_cb, 
