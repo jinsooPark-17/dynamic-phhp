@@ -16,6 +16,15 @@ def quaternion_to_yaw(q):
     yaw = atan2(2.0*(q.w*q.z+q.x*q.y), 1.0-2.0*(q.y*q.y+q.z*q.z))
     return yaw
 
+class Costmap:
+    # Data class
+    def __init__(self, costmap_msg, sigma=0.5):
+        self.w = costmap_msg.info.width
+        self.h = costmap_msg.info.height
+        self.resolution = costmap_msg.info.resolution
+        self.origin = np.array([costmap_msg.info.origin.position.x, costmap_msg.info.origin.position.y])
+        self.costmap = np.array(costmap_msg.data, dtype=np.float64).reshape(self.w, self.h) / 100.
+
 class Movebase:
     def __init__(self, id, map_frame='level_mux_map'):
         self.id = id
@@ -123,52 +132,149 @@ class Movebase:
     def is_arrived(self):
         return (self.__move_base.get_state() == GoalStatus.SUCCEEDED)
 
-import matplotlib.pyplot as plt
 class Agent(Movebase):
-    def __init__(self, id, map_frame='level_mux_map'):
+    def __init__(
+            self, id, 
+            num_scan_history, 
+            sensor_horizon, 
+            plan_interval, 
+            map_frame='level_mux_map'):
         super().__init__(id, map_frame)
 
-        # Define scan related variables
-        sample_scan_msg = rospy.wait_for_message(
-            os.path.join(id, 'scan_filtered'), 
-            LaserScan
-        )
-        self.theta = np.linspace(sample_scan_msg.angle_min, sample_scan_msg.angle_max, len(sample_scan_msg.ranges))[::-1]
-        self.raw_scan = None
+        # Define state related variables
+        sample_scan_msg = rospy.wait_for_message(os.path.join(id, 'scan_filtered'), LaserScan)
+        n_scan = len(sample_scan_msg.ranges)
+        self.theta = np.linspace(sample_scan_msg.angle_min, sample_scan_msg.angle_max, n_scan)[::-1]
+        self.num_scan_history = num_scan_history
+        self.max_range = sensor_horizon
+        self.raw_scan, self.raw_scan_idx = np.zeros((num_scan_history, n_scan)), 0
+        self.hal_scan, self.hal_scan_idx = np.zeros((num_scan_history, n_scan)), 0
 
-        self.__sub_raw_scan = rospy.Subscriber(
-            os.path.join(id, 'scan_filtered'),
-            LaserScan,
-            self.__raw_scan_cb
-        )
-        plt.figure()
-        plt.xlim(-25.0, 5.0)
-        plt.ylim( -1.0, 1.0)
+        self.cmd_vel = dict(stamp=rospy.Time(0), data=np.zeros(4))  # v, w, max(v), max(w)
 
-    def __raw_scan_cb(self, scan_msg):
-        sx, sy = self.scan_to_global_pointcloud(scan_msg.ranges)
-        plt.scatter(sx, sy, c='k', s=1)
+        self.prev_plan = None   # previous plan to calculate directed_hausdorff distance
+        self.curr_plan = None   # current plan to present as state
+        self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)
 
-    def scan_to_global_pointcloud(self, scan):
+        # Define subscirbers
+        self.__sub_odom = rospy.Subscriber(os.path.join(id, 'odom'), Odometry, self.__odom_cb)
+        self.__sub_plan = rospy.Subscriber(os.path.join(id, 'move_base', 'NavfnROS', 'plan'), Path, self.__plan_cb)
+        self.__sub_cmd_vel = rospy.Subscriber(os.path.join(id, 'cmd_vel'), Twist, self.__cmd_vel_cb)
+        self.__sub_raw_scan = rospy.Subscriber(os.path.join(id, 'scan_filtered'), LaserScan, self.__raw_scan_cb)
+        self.__sub_hal_scan = rospy.Subscriber(os.path.join(id, 'scan_hallucinated'), LaserScan, self.__hal_scan_cb)
+
+        # Define internal parameters
+        self.pose = None
+        self.map = Costmap(rospy.wait_for_message(os.path.join(id, 'move_base', 'global_costmap', 'costmap'), OccupancyGrid))
+
+    def __odom_cb(self, odom_msg):
+        self.pose = odom_msg.pose.pose
+        # TODO: Convert odom to map frame during real deployment
+    
+    def __plan_cb(self, plan_msg):
+        self.curr_plan = np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.poses])
+
+    def __cmd_vel_cb(self, vel_msg):
+        self.cmd_vel['stamp'] = rospy.Time.now()    # Stamp to exclude pre-dated message
+        self.cmd_vel['data'][0] = vel_msg.linear.x
+        self.cmd_vel['data'][1] = vel_msg.angular.z
+        self.cmd_vel['data'][2] = self.cmd_vel['data'][[0,2]].max()
+        self.cmd_vel['data'][3] = self.cmd_vel['data'][[1,3]].max()
+
+    def exclude_known_information(self, scan):
+        # Convert scan to global pointcloud
         dx = 0.15875
         yaw = quaternion_to_yaw(self.pose.orientation)
         sensor_x = self.pose.position.x + dx*cos(yaw)
         sensor_y = self.pose.position.y + dx*sin(yaw)
 
-        scan_x = sensor_x + scan * np.cos(self.theta+yaw)
-        scan_y = sensor_y + scan * np.sin(self.theta+yaw)
-        finite_idx = np.isfinite(scan_x) * np.isfinite(scan_y)
+        scan_x = sensor_x + scan * np.cos(self.theta + yaw)
+        scan_y = sensor_y + scan * np.sin(self.theta + yaw)
+        valid_idx = np.logical_and(np.isfinite(scan_x), np.isfinite(scan_y))
 
-        return scan_x[finite_idx], scan_y[finite_idx]
+        scan_x_pixel = ((scan_x[valid_idx] - self.map.origin[0]) / self.map.resolution).round().astype(int)
+        scan_y_pixel = ((scan_y[valid_idx] - self.map.origin[1]) / self.map.resolution).round().astype(int)
+        valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel, scan_y_pixel] < 1.0)
+
+        uncharted_scan = np.zeros_like(scan)
+        uncharted_scan[valid_idx] = scan[valid_idx]
+        return uncharted_scan
+    
+    def __raw_scan_cb(self, scan_msg):
+        # Only store uncharted information
+        self.raw_scan[self.raw_scan_idx] = scan_msg.ranges
+        # self.raw_scan[self.raw_scan_idx] = self.exclude_known_information(scan_msg.ranges)
+        self.raw_scan_idx = (self.raw_scan_idx + 1) % self.num_scan_history
+
+    def __hal_scan_cb(self, scan_msg):
+        # Only store uncharted information
+        self.hal_scan[self.hal_scan_idx] = scan_msg.ranges
+        # self.hal_scan[self.hal_scan_idx] = self.exclude_known_information(scan_msg.ranges)
+        self.hal_scan_idx = (self.hal_scan_idx + 1) % self.num_scan_history
+
+    def filter_plan(self, plan, pose):
+        # remove expired plans
+        p = np.array([pose.position.x, pose.position.y])
+        distance_to_robot = np.linalg.norm(plan - p, axis=1)
+        expired_idx = np.argmin(distance_to_robot)
+        valid_plan = np.insert(plan[expired_idx:], p, 0, axis=0)
+
+        distance = np.linalg.norm(valid_plan[1:] - valid_plan[:-1], axis=1)
+        filtered_plan = valid_plan[np.searchsorted(distance, self.plan_interval)]
+        return filtered_plan
+
+    def get_state(self, cmd_vel_type='max'):
+        # State #1: scan
+        raw_scans = np.roll(self.raw_scan, -self.raw_scan_idx) / self.sensor_horizon
+        hal_scans = np.roll(self.hal_scan, -self.hal_scan_idx) / self.sensor_horizon
+        ## leave only visible scans
+        raw_scans[raw_scans > 1.0] = 0.
+        hal_scans[hal_scans > 1.0] = 0.
+
+        # State #2: plan
+        prev_plan  = self.filter_plan(self.prev_plan, self.pose)
+        curr_plan  = self.filter_plan(self.curr_plan, self.pose)
+        self.prev_plan = self.curr_plan.copy()
+
+        dx, dy = curr_plan.T
+        ego_plan = np.vstack((np.hypot(dx,dy)/self.sensor_horizon, np.arctan2(dy,dx)/np.pi)).T
+
+        # State #3: cmd_vel
+        if cmd_vel_type == 'max':
+            vw = self.cmd_vel['data'][2:].copy()
+        elif (rospy.Time.now() - self.cmd_vel['stamp']).to_sec() < 0.1:
+            vw = self.cmd_vel['data'][:2].copy()
+        else:
+            vw = np.zeros(2)
+
+        state = dict(scan=np.vstack((raw_scans, hal_scans)), plan=ego_plan, prev_plan=prev_plan, vw=vw)
+        return state
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     rospy.init_node('dev_agent', anonymous=True)
     rospy.sleep(1.0)
     
-    marvin = Movebase('marvin')
-
-    print("Test move function")
+    marvin = Agent(id='marvin', num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5)
     marvin.move(-5.0, 0., np.pi, timeout=60.0)
+
+    frame_id = 0
     while not marvin.is_arrived():
-        rospy.sleep(0.01)
-    plt.savefig('scan_history.png')
+        state = marvin.get_state()
+
+        # save ego-centric frame
+        plt.figure(figsize=(8,8))
+        scan_x = state['scan'] * np.cos(marvin.theta) * marvin.sensor_horizon
+        scan_y = state['scan'] * np.sin(marvin.theta) * marvin.sensor_horizon
+        plt.scatter(scan_x[0], scan_y[0], c='r', s=1)
+        plt.scatter(scan_x[1], scan_y[1], c='b', s=1)
+        
+        r, theta = state['plan'][:,0] * marvin.sensor_horizon, state['plan'][:,1] * np.pi
+        plan_x = r * np.cos(theta)
+        plan_y = r * np.sin(theta)
+        plt.plot(plan_x, plan_y)
+
+        plt.savefig(f"debug/{frame_id:05d}.png")
+        frame_id += 1
+        rospy.sleep(0.1)
+        plt.close()
