@@ -6,6 +6,7 @@ from scipy.spatial.distance import directed_hausdorff
 import rospy
 from actionlib import SimpleActionClient
 from std_srvs.srv import Empty
+from nav_msgs.srv import GetPlan, GetPlanRequest
 from nav_msgs.msg import Path, Odometry, OccupancyGrid
 from sensor_msgs.msg import LaserScan
 from actionlib_msgs.msg import GoalStatus
@@ -25,12 +26,12 @@ class Costmap:
         self.origin = np.array([costmap_msg.info.origin.position.x, costmap_msg.info.origin.position.y])
         self.costmap = np.array(costmap_msg.data, dtype=np.float64).reshape(self.w, self.h) / 100.
 
-class Movebase:
+class Movebase(object):
     def __init__(self, id, map_frame='level_mux_map'):
         self.id = id
         self.ttd = None
         self.goal = None
-        self.__map_frame = os.path.join(id, map_frame)
+        self.map_frame = os.path.join(id, map_frame)
 
         # Define move_base parameters
         self.__move_base = SimpleActionClient(os.path.join(self.id, 'move_base'), MoveBaseAction)
@@ -49,7 +50,7 @@ class Movebase:
     def localize(self, x, y, yaw, var=0.01):
         msg = PoseWithCovarianceStamped()
         msg.header.stamp = rospy.Time.now()
-        msg.header.frame_id = self.__map_frame
+        msg.header.frame_id = self.map_frame
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
         msg.pose.pose.orientation.z = sin(yaw/2.)
@@ -77,7 +78,7 @@ class Movebase:
     def move(self, x, y, yaw, timeout=60.0):
         self.goal = MoveBaseGoal()
         self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
-        self.goal.target_pose.header.frame_id = self.__map_frame
+        self.goal.target_pose.header.frame_id = self.map_frame
         self.goal.target_pose.pose.position.x = x
         self.goal.target_pose.pose.position.y = y
         self.goal.target_pose.pose.orientation.z = sin(yaw/2.)
@@ -135,7 +136,7 @@ class Agent(Movebase):
             sensor_horizon, 
             plan_interval, 
             map_frame='level_mux_map'):
-        super().__init__(id, map_frame)
+        super(Agent, self).__init__(id, map_frame)
 
         # Define internal parameters
         self.pose = None
@@ -163,6 +164,14 @@ class Agent(Movebase):
         self.__sub_cmd_vel = rospy.Subscriber(os.path.join(id, 'cmd_vel'), Twist, self.__cmd_vel_cb)
         self.__sub_raw_scan = rospy.Subscriber(os.path.join(id, 'scan_filtered'), LaserScan, self.__raw_scan_cb)
         self.__sub_hal_scan = rospy.Subscriber(os.path.join(id, 'scan_hallucinated'), LaserScan, self.__hal_scan_cb)
+
+        # Define services
+        self.__make_plan_srv = rospy.ServiceProxy(os.path.join(self.id, "move_base", "NavfnROS", "make_plan"), GetPlan)
+
+        while not rospy.is_shutdown():
+            if self.pose is not None:
+                break
+            rospy.sleep(1e-3)
 
     def __odom_cb(self, odom_msg):
         self.pose = odom_msg.pose.pose
@@ -205,19 +214,44 @@ class Agent(Movebase):
 
     def __hal_scan_cb(self, scan_msg):
         # Only store uncharted information
-        self.hal_scan[self.hal_scan_idx] = scan_msg.ranges
-        # self.hal_scan[self.hal_scan_idx] = self.exclude_known_information(scan_msg.ranges)
+        self.hal_scan[self.hal_scan_idx] = self.exclude_known_information(scan_msg.ranges)
         self.hal_scan_idx = (self.hal_scan_idx + 1) % self.num_scan_history
 
-    def filter_plan(self, plan, pose):
-        # remove expired plans
-        p = np.array([pose.position.x, pose.position.y])
-        distance_to_robot = np.linalg.norm(plan - p, axis=1)
-        expired_idx = np.argmin(distance_to_robot)
-        valid_plan = np.insert(plan[expired_idx:], p, 0, axis=0)
+    def make_plan(self, goal_x, goal_y, goal_yaw):
+        service_req = GetPlanRequest()
+        service_req.start.header = self.map_frame
+        service_req.start.pose = self.pose
+        service_req.goal.pose.position.x = goal_x
+        service_req.goal.pose.position.y = goal_y
+        service_req.goal.pose.orientation.z = sin(goal_yaw/2.)
+        service_req.goal.pose.orientation.w = cos(goal_yaw/2.)
+        service_req.tolerance = 0.1
 
-        distance = np.linalg.norm(valid_plan[1:] - valid_plan[:-1], axis=1)
-        filtered_plan = valid_plan[np.searchsorted(distance, self.plan_interval)]
+        rospy.wait_for_message(os.path.join(self.id, 'move_base', 'NavfnROS', 'make_plan'))
+        try:
+            plan_msg = self.__make_plan_srv(service_req)
+            plan = np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.plan.poses])
+        except rospy.ServiceException as e:
+            raise RuntimeError("{}: make_plan failed\n{}".format(self.id, e))
+
+        return plan
+
+    def move(self, x, y, yaw, timeout=60.0):
+        # Make global plan to the goal
+        self.curr_plan = self.prev_plan = self.make_plan(x, y, yaw)        
+        super(Agent, self).move(x, y, yaw, timeout)
+
+    def find_valid_plan(self, plan):
+        p = np.array([self.pose.position.x, self.pose.position.y])
+        dist_to_robot = np.linalg.norm(plan-p, axis=1)
+        valid_idx = np.argmin(dist_to_robot)
+        return plan[valid_idx:]
+
+    def filter_plan(self, valid_plan):
+        valid_plan = np.insert(valid_plan, 0, [self.pose.position.x, self.pose.position.y], axis=0)
+        d = np.cumsum(np.linalg.norm(valid_plan[1:] - valid_plan[:-1], axis=1))
+        idx = np.searchsorted(d, self.plan_interval)
+        filtered_plan = valid_plan[idx]
         return filtered_plan
 
     def get_state(self, cmd_vel_type='max'):
@@ -229,12 +263,13 @@ class Agent(Movebase):
         hal_scans[hal_scans > 1.0] = 0.
 
         # State #2: plan
-        prev_plan  = self.filter_plan(self.prev_plan, self.pose)
-        curr_plan  = self.filter_plan(self.curr_plan, self.pose)
+        prev_plan = self.find_valid_plan(self.prev_plan)
+        curr_plan = self.find_valid_plan(self.curr_plan)
+        hausdorff = -directed_hausdorff(prev_plan, curr_plan)
         self.prev_plan = self.curr_plan.copy()
 
-        dx, dy = curr_plan.T
-        ego_plan = np.vstack((np.hypot(dx,dy)/self.sensor_horizon, np.arctan2(dy,dx)/np.pi)).T
+        plan_x, plan_y = self.filter_plan(curr_plan).T
+        ego_plan = np.vstack((np.hypot(plan_x,plan_y)/self.sensor_horizon, np.arctan2(plan_y,plan_x)/np.pi)).T
 
         # State #3: cmd_vel
         if cmd_vel_type == 'max':
@@ -244,11 +279,17 @@ class Agent(Movebase):
         else:
             vw = np.zeros(2)
 
-        state = dict(scan=np.vstack((raw_scans, hal_scans)), plan=ego_plan, prev_plan=prev_plan, vw=vw)
+        state = dict(
+            scan=np.vstack((raw_scans, hal_scans)), 
+            plan=ego_plan, 
+            hausdorff_dist=hausdorff, 
+            vw=vw
+        )
         return state
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
+    os.makedirs('debug')
     rospy.init_node('dev_agent', anonymous=True)
     rospy.sleep(1.0)
     
@@ -260,18 +301,19 @@ if __name__ == '__main__':
         state = marvin.get_state()
 
         # save ego-centric frame
-        plt.figure(figsize=(8,8))
+        plt.figure(figsize=(8,8)); plt.xlim(-8.5, 8.5); plt.ylim(-8.5, 8.5)
         scan_x = state['scan'] * np.cos(marvin.theta) * marvin.sensor_horizon
         scan_y = state['scan'] * np.sin(marvin.theta) * marvin.sensor_horizon
         plt.scatter(scan_x[0], scan_y[0], c='r', s=1)
         plt.scatter(scan_x[1], scan_y[1], c='b', s=1)
-        
+
         r, theta = state['plan'][:,0] * marvin.sensor_horizon, state['plan'][:,1] * np.pi
         plan_x = r * np.cos(theta)
         plan_y = r * np.sin(theta)
-        plt.plot(plan_x, plan_y)
+        plt.plot(plan_x, plan_y, 'k:')
 
+        plt.title(f"{state['vw']}")
         plt.savefig(f"debug/{frame_id:05d}.png")
-        frame_id += 1
-        rospy.sleep(0.1)
         plt.close()
+        frame_id += 1
+        rospy.sleep(0.5)
