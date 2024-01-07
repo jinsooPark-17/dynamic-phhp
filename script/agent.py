@@ -151,7 +151,7 @@ class Agent(Movebase):
         self.raw_scan, self.raw_scan_idx = np.zeros((num_scan_history, n_scan)), 0
         self.hal_scan, self.hal_scan_idx = np.zeros((num_scan_history, n_scan)), 0
 
-        self.cmd_vel = dict(stamp=rospy.Time(0), data=np.zeros(4))  # v, w, max(v), max(w)
+        self.cmd_vel = np.zeros(2)  # max(v), max(w)
 
         self.prev_plan = None   # previous plan to calculate directed_hausdorff distance
         self.curr_plan = None   # current plan to present as state
@@ -181,11 +181,8 @@ class Agent(Movebase):
         self.curr_plan = np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.poses])
 
     def __cmd_vel_cb(self, vel_msg):
-        self.cmd_vel['stamp'] = rospy.Time.now()    # Stamp to exclude pre-dated message
-        self.cmd_vel['data'][0] = vel_msg.linear.x
-        self.cmd_vel['data'][1] = vel_msg.angular.z
-        self.cmd_vel['data'][2] = self.cmd_vel['data'][[0,2]].max()
-        self.cmd_vel['data'][3] = self.cmd_vel['data'][[1,3]].max()
+        self.cmd_vel[0] = max(self.cmd_vel[0], vel_msg.linear.x)
+        self.cmd_vel[1] = max(self.cmd_vel[1], vel_msg.angular.z)
 
     def exclude_known_information(self, scan):
         if not isinstance(scan, np.ndarray):
@@ -202,7 +199,7 @@ class Agent(Movebase):
 
         scan_x_pixel = ((scan_x - self.map.origin[0]) / self.map.resolution).round().astype(int)
         scan_y_pixel = ((scan_y - self.map.origin[1]) / self.map.resolution).round().astype(int)
-        valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel[valid_idx], scan_y_pixel[valid_idx]] < 1.0)
+        valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel[valid_idx], scan_y_pixel[valid_idx]] < 0.95)
 
         uncharted_scan = np.zeros_like(scan)
         uncharted_scan[valid_idx] = scan[valid_idx]
@@ -211,8 +208,7 @@ class Agent(Movebase):
     
     def __raw_scan_cb(self, scan_msg):
         # Only store uncharted information
-        self.raw_scan[self.raw_scan_idx] = scan_msg.ranges
-        # self.raw_scan[self.raw_scan_idx] = self.exclude_known_information(scan_msg.ranges)
+        self.raw_scan[self.raw_scan_idx] = self.exclude_known_information(scan_msg.ranges)
         self.raw_scan_idx = (self.raw_scan_idx + 1) % self.num_scan_history
 
     def __hal_scan_cb(self, scan_msg):
@@ -257,7 +253,7 @@ class Agent(Movebase):
         filtered_plan = valid_plan[idx]
         return filtered_plan
 
-    def get_state(self, cmd_vel_type='max'):
+    def get_state(self):
         # State #1: scan
         raw_scans = np.roll(self.raw_scan, -self.raw_scan_idx) / self.sensor_horizon
         hal_scans = np.roll(self.hal_scan, -self.hal_scan_idx) / self.sensor_horizon
@@ -279,13 +275,8 @@ class Agent(Movebase):
         ego_plan = ego_plan / [self.sensor_horizon, np.pi]
 
         # State #3: cmd_vel
-        if cmd_vel_type == 'max':
-            vw = self.cmd_vel['data'][2:].copy()
-        elif (rospy.Time.now() - self.cmd_vel['stamp']).to_sec() < 0.1:
-            vw = self.cmd_vel['data'][:2].copy()
-        else:
-            vw = np.zeros(2)
-        self.cmd_vel['data'][:] = 0.
+        vw = self.cmd_vel.copy()
+        self.cmd_vel[:] = 0.
 
         state = dict(
             scan=np.vstack((raw_scans, hal_scans)), 
@@ -296,6 +287,7 @@ class Agent(Movebase):
         return state
 
 if __name__ == '__main__':
+    import time
     import matplotlib.pyplot as plt
     if not os.path.exists('debug'):
         os.makedirs('debug')
@@ -307,7 +299,9 @@ if __name__ == '__main__':
 
     frame_id = 0
     while not marvin.is_arrived():
+        start_time = time.time()
         state = marvin.get_state()
+        print(time.time() - start_time, state)
 
         # save ego-centric frame
         plt.figure(figsize=(8,8)); plt.xlim(-8.5, 8.5); plt.ylim(-8.5, 8.5)
