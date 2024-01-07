@@ -188,6 +188,8 @@ class Agent(Movebase):
         self.cmd_vel['data'][3] = self.cmd_vel['data'][[1,3]].max()
 
     def exclude_known_information(self, scan):
+        if not isinstance(scan, np.ndarray):
+            scan = np.array(scan)
         # Convert scan to global pointcloud
         dx = 0.15875
         yaw = quaternion_to_yaw(self.pose.orientation)
@@ -198,12 +200,13 @@ class Agent(Movebase):
         scan_y = sensor_y + scan * np.sin(self.theta + yaw)
         valid_idx = np.logical_and(np.isfinite(scan_x), np.isfinite(scan_y))
 
-        scan_x_pixel = ((scan_x[valid_idx] - self.map.origin[0]) / self.map.resolution).round().astype(int)
-        scan_y_pixel = ((scan_y[valid_idx] - self.map.origin[1]) / self.map.resolution).round().astype(int)
-        valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel, scan_y_pixel] < 1.0)
+        scan_x_pixel = ((scan_x - self.map.origin[0]) / self.map.resolution).round().astype(int)
+        scan_y_pixel = ((scan_y - self.map.origin[1]) / self.map.resolution).round().astype(int)
+        valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel[valid_idx], scan_y_pixel[valid_idx]] < 1.0)
 
         uncharted_scan = np.zeros_like(scan)
         uncharted_scan[valid_idx] = scan[valid_idx]
+
         return uncharted_scan
     
     def __raw_scan_cb(self, scan_msg):
@@ -219,7 +222,7 @@ class Agent(Movebase):
 
     def make_plan(self, goal_x, goal_y, goal_yaw):
         service_req = GetPlanRequest()
-        service_req.start.header = self.map_frame
+        service_req.start.header.frame_id = service_req.goal.header.frame_id = self.map_frame
         service_req.start.pose = self.pose
         service_req.goal.pose.position.x = goal_x
         service_req.goal.pose.position.y = goal_y
@@ -227,7 +230,7 @@ class Agent(Movebase):
         service_req.goal.pose.orientation.w = cos(goal_yaw/2.)
         service_req.tolerance = 0.1
 
-        rospy.wait_for_message(os.path.join(self.id, 'move_base', 'NavfnROS', 'make_plan'))
+        rospy.wait_for_service(os.path.join(self.id, 'move_base', 'NavfnROS', 'make_plan'))
         try:
             plan_msg = self.__make_plan_srv(service_req)
             plan = np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.plan.poses])
@@ -265,11 +268,15 @@ class Agent(Movebase):
         # State #2: plan
         prev_plan = self.find_valid_plan(self.prev_plan)
         curr_plan = self.find_valid_plan(self.curr_plan)
-        hausdorff = -directed_hausdorff(prev_plan, curr_plan)
+        hausdorff, _, _ = directed_hausdorff(prev_plan, curr_plan)
         self.prev_plan = self.curr_plan.copy()
 
-        plan_x, plan_y = self.filter_plan(curr_plan).T
-        ego_plan = np.vstack((np.hypot(plan_x,plan_y)/self.sensor_horizon, np.arctan2(plan_y,plan_x)/np.pi)).T
+        x = self.pose.position.x
+        y = self.pose.position.y
+        yaw = quaternion_to_yaw(self.pose.orientation)
+        plan_x, plan_y = (self.filter_plan(curr_plan) - [x, y]).T
+        ego_plan = np.vstack((np.hypot(plan_x,plan_y), np.arctan2(plan_y,plan_x) - yaw )).T
+        ego_plan = ego_plan / [self.sensor_horizon, np.pi]
 
         # State #3: cmd_vel
         if cmd_vel_type == 'max':
@@ -278,6 +285,7 @@ class Agent(Movebase):
             vw = self.cmd_vel['data'][:2].copy()
         else:
             vw = np.zeros(2)
+        self.cmd_vel['data'][:] = 0.
 
         state = dict(
             scan=np.vstack((raw_scans, hal_scans)), 
@@ -289,7 +297,8 @@ class Agent(Movebase):
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    os.makedirs('debug')
+    if not os.path.exists('debug'):
+        os.makedirs('debug')
     rospy.init_node('dev_agent', anonymous=True)
     rospy.sleep(1.0)
     
@@ -304,7 +313,7 @@ if __name__ == '__main__':
         plt.figure(figsize=(8,8)); plt.xlim(-8.5, 8.5); plt.ylim(-8.5, 8.5)
         scan_x = state['scan'] * np.cos(marvin.theta) * marvin.sensor_horizon
         scan_y = state['scan'] * np.sin(marvin.theta) * marvin.sensor_horizon
-        plt.scatter(scan_x[0], scan_y[0], c='r', s=1)
+        plt.scatter(scan_x[0], scan_y[0], c='r', s=2)
         plt.scatter(scan_x[1], scan_y[1], c='b', s=1)
 
         r, theta = state['plan'][:,0] * marvin.sensor_horizon, state['plan'][:,1] * np.pi
