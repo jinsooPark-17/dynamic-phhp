@@ -30,7 +30,6 @@ class Movebase:
         self.id = id
         self.ttd = None
         self.goal = None
-        self.pose = None
         self.__map_frame = os.path.join(id, map_frame)
 
         # Define move_base parameters
@@ -67,7 +66,7 @@ class Movebase:
         for _ in range(10):
             self.__pub_localize.publish(msg)
             rospy.sleep(0.01)
-        self.pose = msg.pose.pose
+
     def clear_costmap(self):
         rospy.wait_for_service( os.path.join(self.id, "move_base", "clear_costmaps") )
         try:
@@ -76,7 +75,6 @@ class Movebase:
             raise RuntimeError("{}: {}".format(self.id, e))
 
     def move(self, x, y, yaw, timeout=60.0):
-        self.pose = None
         self.goal = MoveBaseGoal()
         self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
         self.goal.target_pose.header.frame_id = self.__map_frame
@@ -100,7 +98,6 @@ class Movebase:
             return
 
         # Change timeout value
-        self.pose = None
         self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
         self.__move_base.send_goal(
             self.goal, 
@@ -118,7 +115,6 @@ class Movebase:
     def feedback_cb(self, feedback):
         if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
             self.stop()
-        self.pose = feedback.base_position.pose
     def done_cb(self, state, result):
         self.ttd = (rospy.Time.now() - self.ttd).to_sec()
 
@@ -141,6 +137,10 @@ class Agent(Movebase):
             map_frame='level_mux_map'):
         super().__init__(id, map_frame)
 
+        # Define internal parameters
+        self.pose = None
+        self.map = Costmap(rospy.wait_for_message(os.path.join(id, 'move_base', 'global_costmap', 'costmap'), OccupancyGrid))
+
         # Define state related variables
         sample_scan_msg = rospy.wait_for_message(os.path.join(id, 'scan_filtered'), LaserScan)
         n_scan = len(sample_scan_msg.ranges)
@@ -154,6 +154,7 @@ class Agent(Movebase):
 
         self.prev_plan = None   # previous plan to calculate directed_hausdorff distance
         self.curr_plan = None   # current plan to present as state
+        self.sensor_horizon = sensor_horizon
         self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)
 
         # Define subscirbers
@@ -162,10 +163,6 @@ class Agent(Movebase):
         self.__sub_cmd_vel = rospy.Subscriber(os.path.join(id, 'cmd_vel'), Twist, self.__cmd_vel_cb)
         self.__sub_raw_scan = rospy.Subscriber(os.path.join(id, 'scan_filtered'), LaserScan, self.__raw_scan_cb)
         self.__sub_hal_scan = rospy.Subscriber(os.path.join(id, 'scan_hallucinated'), LaserScan, self.__hal_scan_cb)
-
-        # Define internal parameters
-        self.pose = None
-        self.map = Costmap(rospy.wait_for_message(os.path.join(id, 'move_base', 'global_costmap', 'costmap'), OccupancyGrid))
 
     def __odom_cb(self, odom_msg):
         self.pose = odom_msg.pose.pose
