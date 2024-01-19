@@ -155,7 +155,7 @@ class Agent(Movebase):
         self.prev_plan = None   # previous plan to calculate directed_hausdorff distance
         self.curr_plan = None   # current plan to present as state
         self.sensor_horizon = sensor_horizon
-        self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)
+        self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)[1:]
 
         # Define services
         self.__make_plan_srv = rospy.ServiceProxy(os.path.join(self.id, "move_base", "NavfnROS", "make_plan"), GetPlan)
@@ -202,7 +202,10 @@ class Agent(Movebase):
 
         scan_x_pixel = ((scan_x - self.map.origin[0]) / self.map.resolution).round().astype(int)
         scan_y_pixel = ((scan_y - self.map.origin[1]) / self.map.resolution).round().astype(int)
-        valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel[valid_idx], scan_y_pixel[valid_idx]] < 0.95)
+        try:
+            valid_idx[valid_idx] = (self.map.costmap[scan_x_pixel[valid_idx], scan_y_pixel[valid_idx]] < 0.95)
+        except IndexError:
+            return np.zeros_like(scan)
 
         uncharted_scan = np.zeros_like(scan)
         uncharted_scan[valid_idx] = scan[valid_idx]
@@ -245,9 +248,9 @@ class Agent(Movebase):
             raise RuntimeError("{}: clear hallucination failed\n{}".format(self.id, e))
 
     def move(self, x, y, yaw, timeout=60.0, mode='vanilla', **kwargs):
-        if mode=='baseline' and kwargs.keys() >= {'traffic'}:
+        if mode=='baseline' and not kwargs.keys() >= {'traffic'}:
             raise KeyError("Baseline mode require traffic argument!:\n\t[left, right]")
-        if mode=='phhp' and kwargs.keys() >= {'comms_topic', 'traffic'}:
+        if mode=='phhp' and not kwargs.keys() >= {'comms_topic', 'traffic'}:
             raise KeyError("PHHP mode require comms_topic argument!:\n\tamcl_pose topic of opponent robot")
 
         # Make global plan to the goal
@@ -275,20 +278,21 @@ class Agent(Movebase):
         self.ttd = rospy.Time.now()
         
         # Define baseline parameters
-        dy = 0.05
+        gap      = 0.05
         radius   = 0.2
         traffic  = self.__kwargs['traffic']
 
         # Place virtual objects all around the global plan
-        plan = self.plan.copy()
+        #   no plan
+        plan = self.curr_plan.copy()
         dx, dy = (plan[2:] - plan[:-2]).T
         theta = np.arctan2(dy, dx) + (np.pi/2. if traffic=='left' else -np.pi/2.)
 
         msg = PolygonStamped()
         msg.header.stamp = self.goal.target_pose.header.stamp
-        for (x,y,_), th in zip(plan[80:-80:4], theta[79:-81:4]):
-            cx = x + (radius+dy)*sin(th)
-            cy = y + (radius+dy)*cos(th)
+        for (x,y), th in zip(plan[80:-80:4], theta[79:-81:4]):
+            cx = x + (radius+gap)*cos(th)
+            cy = y + (radius+gap)*sin(th)
             msg.polygon.points.append(Point32(cx, cy, radius))
         self.__pub_hallucination.publish(msg)
 
@@ -363,17 +367,23 @@ class Agent(Movebase):
         hal_scans[hal_scans > 1.0] = 0.
 
         # State #2: plan
-        prev_plan = self.find_valid_plan(self.prev_plan)
-        curr_plan = self.find_valid_plan(self.curr_plan)
-        hausdorff, _, _ = directed_hausdorff(prev_plan, curr_plan)
+        if prev_plan.size == 0:
+            hausdorff = -0.3
+        else:
+            prev_plan = self.find_valid_plan(self.prev_plan)
+            curr_plan = self.find_valid_plan(self.curr_plan)
+            hausdorff, _, _ = directed_hausdorff(prev_plan, curr_plan)
         self.prev_plan = self.curr_plan.copy()
 
-        x = self.pose.position.x
-        y = self.pose.position.y
-        yaw = quaternion_to_yaw(self.pose.orientation)
-        plan_x, plan_y = (self.filter_plan(curr_plan) - [x, y]).T
-        ego_plan = np.vstack((np.hypot(plan_x,plan_y), np.arctan2(plan_y,plan_x) - yaw )).T
-        ego_plan = ego_plan / [self.sensor_horizon, np.pi]
+        if curr_plan.size == 0:
+            ego_plan = np.zeros((self.plan_interval.shape[0], 2))
+        else:
+            x = self.pose.position.x
+            y = self.pose.position.y
+            yaw = quaternion_to_yaw(self.pose.orientation)
+            plan_x, plan_y = (self.filter_plan(curr_plan) - [x, y]).T
+            ego_plan = np.vstack((np.hypot(plan_x,plan_y), np.arctan2(plan_y,plan_x) - yaw )).T
+            ego_plan = ego_plan / [self.sensor_horizon, np.pi]
 
         # State #3: cmd_vel
         vw = self.cmd_vel.copy()

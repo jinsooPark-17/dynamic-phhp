@@ -64,10 +64,12 @@ class TestEpisode(GazeboController):
 
     def reset(self, robot_modes, init_poses: list, goal_poses: list):
         # cancel all previous episodes
-        self.unpuase()
-        for robot in self.robots:
-            robot.pause()
-        rospy.sleep(1.0)
+        self.unpause()
+        for _ in range(10):
+            for robot in self.robots:
+                robot.stop()
+                robot.clear_hallucination()
+            rospy.sleep(0.1)
 
         # Define new episode parameters
         mirror = np.random.choice([True, False])
@@ -78,24 +80,24 @@ class TestEpisode(GazeboController):
         comms_topics = [f'{robot.id}/amcl_pose' for robot in self.robots[::-1]]
 
         # teleport robot to init_pose
-        for robot, init_pose in zip(self.robots, init_poses):
-            self.teleport(robot.id, *init_pose) # init_pose := (x,y,yaw)
-            robot.localize(*init_pose)          # init_pose := (x,y,yaw)
-        rospy.sleep(1.0)
+        for _ in range(10):
+            for robot, init_pose in zip(self.robots, init_poses):
+                self.teleport(robot.id, *init_pose) # init_pose := (x,y,yaw)
+            rospy.sleep(0.1)
 
         # Localize robot, clear costmap and any remaining hallucinations
-        for robot, init_pose in zip(self.robots, init_poses):
-            for _ in range(5):
+        for _ in range(10):
+            for robot, init_pose in zip(self.robots, init_poses):
                 robot.localize(*init_pose)
-                rospy.sleep(0.1)
             robot.clear_costmap()
             robot.clear_hallucination()
+            rospy.sleep(0.1)
         rospy.sleep(1.0)
 
         # Begin episode
         for robot, comms_topic, mode, goal_pose in zip(self.robots, comms_topics, robot_modes, goal_poses):
             robot.move(*goal_pose, timeout=60., mode=mode, traffic=traffic, comms_topic=comms_topic)
-        rospy.sleep(1.0)
+        self.episode_duration.sleep()
 
         # Pause simulation after move_base actually moves
         self.pause()
@@ -200,7 +202,7 @@ if __name__ == '__main__':
     parser.add_argument("--mode1",     type=str, choices=["vanilla", "baseline", "phhp", "dynamic"], required=True)
     parser.add_argument("--mode2",     type=str, choices=["vanilla", "baseline", "phhp", "dynamic"], required=True)
     parser.add_argument("--n_episode", type=int, required=True)
-    args = parser.parser.parse_args()
+    args = parser.parse_args()
 
     env = TestEpisode(
         num_scan_history=1, 
