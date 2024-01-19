@@ -11,7 +11,7 @@ from nav_msgs.msg import Path, Odometry, OccupancyGrid
 from sensor_msgs.msg import LaserScan
 from actionlib_msgs.msg import GoalStatus
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
-from geometry_msgs.msg import Twist, Pose, PoseWithCovarianceStamped
+from geometry_msgs.msg import Twist, Pose, PoseWithCovarianceStamped, PolygonStamped, Point32
 
 def quaternion_to_yaw(q):
     yaw = atan2(2.0*(q.w*q.z+q.x*q.y), 1.0-2.0*(q.y*q.y+q.z*q.z))
@@ -34,8 +34,8 @@ class Movebase(object):
         self.map_frame = os.path.join(id, map_frame)
 
         # Define move_base parameters
-        self.__move_base = SimpleActionClient(os.path.join(self.id, 'move_base'), MoveBaseAction)
-        if not self.__move_base.wait_for_server(timeout=rospy.Duration(10.0)):
+        self.move_base = SimpleActionClient(os.path.join(self.id, 'move_base'), MoveBaseAction)
+        if not self.move_base.wait_for_server(timeout=rospy.Duration(10.0)):
             raise TimeoutError("{}: move_base does not respond.".format(self.id))
 
         # Define services
@@ -45,7 +45,6 @@ class Movebase(object):
         self.__pub_localize = rospy.Publisher(os.path.join(self.id, 'initialpose'), PoseWithCovarianceStamped, queue_size=10)
 
         # Define subscriber
-        # self.__sub_odom = rospy.
 
     def localize(self, x, y, yaw, var=0.01):
         msg = PoseWithCovarianceStamped()
@@ -84,7 +83,7 @@ class Movebase(object):
         self.goal.target_pose.pose.orientation.z = sin(yaw/2.)
         self.goal.target_pose.pose.orientation.w = cos(yaw/2.)
 
-        self.__move_base.send_goal(
+        self.move_base.send_goal(
             self.goal, 
             active_cb=self.active_cb, 
             feedback_cb=self.feedback_cb, 
@@ -92,7 +91,7 @@ class Movebase(object):
         )
     def move_and_wait(self, x, y, yaw):
         self.move(x, y, yaw, timeout=9999.9)
-        self.__move_base.wait_for_result()
+        self.move_base.wait_for_result()
     def resume(self, timeout=30.0):
         if self.goal is None:
             print("{}: ERROR! no previous goal found.".format(self.id))
@@ -100,16 +99,16 @@ class Movebase(object):
 
         # Change timeout value
         self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
-        self.__move_base.send_goal(
+        self.move_base.send_goal(
             self.goal, 
             active_cb=self.active_cb, 
             feedback_cb=self.feedback_cb, 
             done_cb=self.done_cb
         )
     def wait_for_result(self):
-        self.__move_base.wait_for_result()
+        self.move_base.wait_for_result()
     def stop(self):
-        self.__move_base.cancel_all_goals()
+        self.move_base.cancel_all_goals()
 
     def active_cb(self):
         self.ttd = rospy.Time.now()
@@ -120,14 +119,14 @@ class Movebase(object):
         self.ttd = (rospy.Time.now() - self.ttd).to_sec()
 
     def is_running(self):
-        if self.__move_base.get_result() is None:
+        if self.move_base.get_result() is None:
             return True
         if type(self.ttd) is not float:
             self.ttd = (rospy.Time.now() - self.ttd).to_sec()
         return False
 
     def is_arrived(self):
-        return (self.__move_base.get_state() == GoalStatus.SUCCEEDED)
+        return (self.move_base.get_state() == GoalStatus.SUCCEEDED)
 
 class Agent(Movebase):
     def __init__(
@@ -158,15 +157,19 @@ class Agent(Movebase):
         self.sensor_horizon = sensor_horizon
         self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)
 
+        # Define services
+        self.__make_plan_srv = rospy.ServiceProxy(os.path.join(self.id, "move_base", "NavfnROS", "make_plan"), GetPlan)
+        self.__clear_hallucination_srv = rospy.ServiceProxy(os.path.join(self.id, "clear_virtual_circles"), Empty)
+
+        # Define publishers
+        self.__pub_hallucination = rospy.Publisher(os.path.join(self.id, "add_circles"), PolygonStamped, queue_size=10)
+
         # Define subscirbers
         self.__sub_odom = rospy.Subscriber(os.path.join(id, 'odom'), Odometry, self.__odom_cb)
         self.__sub_plan = rospy.Subscriber(os.path.join(id, 'move_base', 'NavfnROS', 'plan'), Path, self.__plan_cb)
         self.__sub_cmd_vel = rospy.Subscriber(os.path.join(id, 'cmd_vel'), Twist, self.__cmd_vel_cb)
         self.__sub_raw_scan = rospy.Subscriber(os.path.join(id, 'scan_filtered'), LaserScan, self.__raw_scan_cb)
         self.__sub_hal_scan = rospy.Subscriber(os.path.join(id, 'scan_hallucinated'), LaserScan, self.__hal_scan_cb)
-
-        # Define services
-        self.__make_plan_srv = rospy.ServiceProxy(os.path.join(self.id, "move_base", "NavfnROS", "make_plan"), GetPlan)
 
         while not rospy.is_shutdown():
             if self.pose is not None:
@@ -229,16 +232,114 @@ class Agent(Movebase):
         rospy.wait_for_service(os.path.join(self.id, 'move_base', 'NavfnROS', 'make_plan'))
         try:
             plan_msg = self.__make_plan_srv(service_req)
-            plan = np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.plan.poses])
         except rospy.ServiceException as e:
             raise RuntimeError("{}: make_plan failed\n{}".format(self.id, e))
 
-        return plan
+        return np.array([[p.pose.position.x, p.pose.position.y] for p in plan_msg.plan.poses])
 
-    def move(self, x, y, yaw, timeout=60.0):
+    def clear_hallucination(self):
+        rospy.wait_for_service(os.path.join(self.id, "clear_virtual_circles"))
+        try:
+            self.__clear_hallucination_srv()
+        except rospy.ServiceException as e:
+            raise RuntimeError("{}: clear hallucination failed\n{}".format(self.id, e))
+
+    def move(self, x, y, yaw, timeout=60.0, mode='vanilla', **kwargs):
+        if mode=='baseline' and kwargs.keys() >= {'traffic'}:
+            raise KeyError("Baseline mode require traffic argument!:\n\t[left, right]")
+        if mode=='phhp' and kwargs.keys() >= {'comms_topic', 'traffic'}:
+            raise KeyError("PHHP mode require comms_topic argument!:\n\tamcl_pose topic of opponent robot")
+
         # Make global plan to the goal
-        self.curr_plan = self.prev_plan = self.make_plan(x, y, yaw)        
-        super(Agent, self).move(x, y, yaw, timeout)
+        self.curr_plan = self.prev_plan = self.make_plan(x, y, yaw)
+
+        self.goal = MoveBaseGoal()
+        self.goal.target_pose.header.stamp = rospy.Time.now() + rospy.Duration(timeout)
+        self.goal.target_pose.header.frame_id = self.map_frame
+        self.goal.target_pose.pose.position.x = x
+        self.goal.target_pose.pose.position.y = y
+        self.goal.target_pose.pose.orientation.z = sin(yaw/2.)
+        self.goal.target_pose.pose.orientation.w = cos(yaw/2.)
+
+        self.__kwargs = kwargs
+        active_cb = (self.baseline_active_cb if mode == 'baseline' else self.active_cb)
+        feedback_cb = (self.phhp_feedback_cb if mode == 'phhp' else self.feedback_cb)
+        self.move_base.send_goal(
+            self.goal, 
+            active_cb=active_cb, 
+            feedback_cb=feedback_cb, 
+            done_cb=self.done_cb
+        )
+
+    def baseline_active_cb(self):
+        self.ttd = rospy.Time.now()
+        
+        # Define baseline parameters
+        dy = 0.05
+        radius   = 0.2
+        traffic  = self.__kwargs['traffic']
+
+        # Place virtual objects all around the global plan
+        plan = self.plan.copy()
+        dx, dy = (plan[2:] - plan[:-2]).T
+        theta = np.arctan2(dy, dx) + (np.pi/2. if traffic=='left' else -np.pi/2.)
+
+        msg = PolygonStamped()
+        msg.header.stamp = self.goal.target_pose.header.stamp
+        for (x,y,_), th in zip(plan[80:-80:4], theta[79:-81:4]):
+            cx = x + (radius+dy)*sin(th)
+            cy = y + (radius+dy)*cos(th)
+            msg.polygon.points.append(Point32(cx, cy, radius))
+        self.__pub_hallucination.publish(msg)
+
+    def phhp_feedback_cb(self, feedback):
+        if feedback.base_position.header.stamp > self.goal.target_pose.header.stamp:
+            self.stop()
+
+        # if PHHP already placed virtual object, ignore
+        if self.__kwargs.has_key('installed'):
+            return
+
+        # Get other robot's position
+        try:
+            msg = rospy.wait_for_message(self.__kwargs['comms_topic'], PoseWithCovarianceStamped, timeout=0.1)
+            opponent = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        except rospy.ROSException as e:
+            return
+        # if my plan does not overlap with opponent robot, ignore
+        plan = self.find_valid_plan(self.curr_plan)
+        dist_to_opponent = np.linalg.norm(plan-opponent, axis=1)
+        if dist_to_opponent.min() > 0.3:
+            return
+        # if distance to opponent is less than 8m, activate PHHP
+        """
+        PHHP parameters:
+            radius = 0.5122
+            dr = 0.0539
+            p_bgn = 0.4842 (3.8736m with detection range: 8.0m)
+            p_end = 0.5001 (4.0008m with detection range: 8.0m)
+        """
+        opponent_idx = np.argmin(dist_to_opponent)
+        dist = np.linalg.norm(plan[1:]-plan[:-1], axis=1).cumsum()
+        if dist[opponent_idx] < 8.0:
+            dx, dy = (plan[2:] - plan[:-2]).T
+            theta = np.arctan2(dy, dx) + np.pi/2.
+            idx_bgn, idx_end = np.searchsorted(dist, [3.8736, 4.0008])
+
+            msg = PolygonStamped()
+            msg.header.stamp = self.goal.target_pose.header.stamp
+            for (x, y), th in zip(plan[idx_bgn:idx_end], theta[idx_bgn-1:idx_end-1]):
+                cx = x + 0.5661 * cos(th)
+                cy = y + 0.5661 * sin(th)
+                if self.__kwargs['traffic'] == 'left':
+                    cy = -cy
+                msg.polygon.points.append(Point32(cx, cy, 0.5122))  # (x,y,r)
+            self.__pub_hallucination.publish(msg)
+            self.__kwargs['installed'] = True
+
+    def done_cb(self, state, result):
+        self.ttd = (rospy.Time.now() - self.ttd).to_sec()
+        self.clear_hallucination()
 
     def find_valid_plan(self, plan):
         p = np.array([self.pose.position.x, self.pose.position.y])
@@ -285,6 +386,38 @@ class Agent(Movebase):
             vw=vw
         )
         return state
+    
+    def action(self, valid, x, y, t, r=0.2):
+        """
+            valid: If True, install virtual obstacle with given (x, y, t, r) value. [True, False]
+            x: proportion of target plan along the ego-centric plan divided by sensor horizon. [0., 1.]
+            y: perpendicular distance from center of virtual circle to the target plan. [-1., 1.]
+            t: proportion of lifetime of virtual circle divided by max lifetime(default: 10.0). [0., 1.]
+        """
+        if not valid:
+            return
+
+        x, y = self.pose.position.x, self.pose.position.y
+        yaw = quaternion_to_yaw(self.pose.orientation)
+
+        # Find target plan from [x] value
+        curr_plan = self.find_valid_plan(self.curr_plan)
+        dist_to_robot = np.linalg.norm(curr_plan[1:] - curr_plan[:-1]).cumsum()
+        target_idx = curr_plan[np.searchsorted(dist_to_robot, x*self.max_range)+1]
+        
+        # Calculate center of virtual obstacle (vo)
+        plan_x, plan_y = curr_plan[target_idx]
+        dx, dy = curr_plan[target_idx-1] - curr_plan(target_idx+1)
+        theta = atan2(dy, dx) + np.pi/2.
+
+        vo_x = plan_x + (5*r * y) * cos(theta)
+        vo_y = plan_y + (5*r * y) * sin(theta)
+
+        # Create virtual obstacle!
+        msg = PolygonStamped()
+        msg.header.stamp = rospy.Time.now() + t * 10.
+        msg.polygon.points = [Point32(vo_x, vo_y, r)]
+        self.__pub_hallucination.publish(msg)
 
 if __name__ == '__main__':
     import time
@@ -308,6 +441,7 @@ if __name__ == '__main__':
         scan_x = state['scan'] * np.cos(marvin.theta) * marvin.sensor_horizon
         scan_y = state['scan'] * np.sin(marvin.theta) * marvin.sensor_horizon
         plt.scatter(scan_x[0], scan_y[0], c='r', s=2)
+
         plt.scatter(scan_x[1], scan_y[1], c='b', s=1)
 
         r, theta = state['plan'][:,0] * marvin.sensor_horizon, state['plan'][:,1] * np.pi
