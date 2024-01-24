@@ -134,10 +134,12 @@ class Agent(Movebase):
             num_scan_history, 
             sensor_horizon, 
             plan_interval, 
-            map_frame='level_mux_map'):
+            map_frame='level_mux_map',
+            radius=0.35):
         super(Agent, self).__init__(id, map_frame)
 
         # Define internal parameters
+        self.radiis = radius
         self.pose = None
         self.map = Costmap(rospy.wait_for_message(os.path.join(id, 'move_base', 'global_costmap', 'costmap'), OccupancyGrid))
 
@@ -146,7 +148,6 @@ class Agent(Movebase):
         n_scan = len(sample_scan_msg.ranges)
         self.theta = np.linspace(sample_scan_msg.angle_min, sample_scan_msg.angle_max, n_scan)[::-1]
         self.num_scan_history = num_scan_history
-        self.max_range = sensor_horizon
         self.raw_scan, self.raw_scan_idx = np.zeros((num_scan_history, n_scan)), 0
         self.hal_scan, self.hal_scan_idx = np.zeros((num_scan_history, n_scan)), 0
 
@@ -301,7 +302,7 @@ class Agent(Movebase):
             self.stop()
 
         # if PHHP already placed virtual object, ignore
-        if self.__kwargs.has_key('installed'):
+        if self.__kwargs.keys() >= {'installed'}:
             return
 
         # Get other robot's position
@@ -327,7 +328,7 @@ class Agent(Movebase):
         dist = np.linalg.norm(plan[1:]-plan[:-1], axis=1).cumsum()
         if dist[opponent_idx] < 8.0:
             dx, dy = (plan[2:] - plan[:-2]).T
-            theta = np.arctan2(dy, dx) + np.pi/2.
+            theta = np.arctan2(dy, dx) + (np.pi/2. if self.__kwargs['traffic']=='left' else -np.pi/2.)
             idx_bgn, idx_end = np.searchsorted(dist, [3.8736, 4.0008])
 
             msg = PolygonStamped()
@@ -335,8 +336,6 @@ class Agent(Movebase):
             for (x, y), th in zip(plan[idx_bgn:idx_end], theta[idx_bgn-1:idx_end-1]):
                 cx = x + 0.5661 * cos(th)
                 cy = y + 0.5661 * sin(th)
-                if self.__kwargs['traffic'] == 'left':
-                    cy = -cy
                 msg.polygon.points.append(Point32(cx, cy, 0.5122))  # (x,y,r)
             self.__pub_hallucination.publish(msg)
             self.__kwargs['installed'] = True
@@ -346,6 +345,8 @@ class Agent(Movebase):
         self.clear_hallucination()
 
     def find_valid_plan(self, plan):
+        if plan.size == 0:
+            return np.array([self.pose.position.x, self.pose.position.y])
         p = np.array([self.pose.position.x, self.pose.position.y])
         dist_to_robot = np.linalg.norm(plan-p, axis=1)
         valid_idx = np.argmin(dist_to_robot)
@@ -367,22 +368,22 @@ class Agent(Movebase):
         hal_scans[hal_scans > 1.0] = 0.
 
         # State #2: plan
-        if prev_plan.size == 0:
-            hausdorff = -0.3
+        curr_plan = self.find_valid_plan(self.curr_plan)
+        if self.prev_plan.size == 0:
+            hausdorff = 0.5
         else:
             prev_plan = self.find_valid_plan(self.prev_plan)
-            curr_plan = self.find_valid_plan(self.curr_plan)
             hausdorff, _, _ = directed_hausdorff(prev_plan, curr_plan)
         self.prev_plan = self.curr_plan.copy()
 
-        if curr_plan.size == 0:
+        if self.curr_plan.size == 0:
             ego_plan = np.zeros((self.plan_interval.shape[0], 2))
         else:
             x = self.pose.position.x
             y = self.pose.position.y
             yaw = quaternion_to_yaw(self.pose.orientation)
             plan_x, plan_y = (self.filter_plan(curr_plan) - [x, y]).T
-            ego_plan = np.vstack((np.hypot(plan_x,plan_y), np.arctan2(plan_y,plan_x) - yaw )).T
+            ego_plan = np.vstack((np.hypot(plan_y, plan_x), np.arctan2(plan_y, plan_x) - yaw )).T
             ego_plan = ego_plan / [self.sensor_horizon, np.pi]
 
         # State #3: cmd_vel
@@ -398,34 +399,43 @@ class Agent(Movebase):
         return state
     
     def action(self, valid, x, y, t, r=0.2):
+        # SOMETHING WIERD! RE-WRITE!
         """
-            valid: If True, install virtual obstacle with given (x, y, t, r) value. [True, False]
-            x: proportion of target plan along the ego-centric plan divided by sensor horizon. [0., 1.]
-            y: perpendicular distance from center of virtual circle to the target plan. [-1., 1.]
-            t: proportion of lifetime of virtual circle divided by max lifetime(default: 10.0). [0., 1.]
+            valid: If True, install virtual obstacle with given (x, y, t, r) value.             [-1., 1.]
+            x: proportion of target plan along the ego-centric plan divided by sensor horizon.  [-1., 1.]
+            y: perpendicular distance from center of virtual circle to the target plan.         [-1., 1.]
+            t: proportion of lifetime of virtual circle divided by max lifetime(default: 10.0). [-1., 1.]
         """
-        if not valid:
+        if valid < -0.:
             return
 
-        x, y = self.pose.position.x, self.pose.position.y
-        yaw = quaternion_to_yaw(self.pose.orientation)
+        # convert action to values
+        x = (x+1.)/2. * self.sensor_horizon # 0. ~ sensor_horizon (default: 0 ~ 8m)
+        y = 5 * r * y                       # -5r ~ 5r (default: -1.0 ~ 1.0 m)
+        t = (t+1.)*5.                       # 0.0 ~ 10.0 seconds
 
         # Find target plan from [x] value
         curr_plan = self.find_valid_plan(self.curr_plan)
         dist_to_robot = np.linalg.norm(curr_plan[1:] - curr_plan[:-1]).cumsum()
-        target_idx = curr_plan[np.searchsorted(dist_to_robot, x*self.max_range)+1]
-        
-        # Calculate center of virtual obstacle (vo)
-        plan_x, plan_y = curr_plan[target_idx]
-        dx, dy = curr_plan[target_idx-1] - curr_plan(target_idx+1)
-        theta = atan2(dy, dx) + np.pi/2.
+        target_plan_idx = np.searchsorted(dist_to_robot, x) + 1
 
-        vo_x = plan_x + (5*r * y) * cos(theta)
-        vo_y = plan_y + (5*r * y) * sin(theta)
+        # Calculate center of virtual obstacle (vo)
+        plan_x, plan_y = curr_plan[target_plan_idx]
+        dx, dy = curr_plan[target_plan_idx+1] - curr_plan[target_plan_idx-1]
+        plan_prep_theta = atan2(dy, dx) - np.pi/2.
+
+        vo_x = plan_x + y * cos(plan_prep_theta)
+        vo_y = plan_y + y * sin(plan_prep_theta)
+
+        # filter invalid case
+        if np.hypot(vo_x - self.pose.position.x, vo_y - self.pose.position.y) < self.radius + r + 0.3:
+            return
+        if np.hypot(vo_x - self.goal.target_pose.pose.position.x, vo_y - self.goal.target_pose.pose.position.y) < self.radius + r + 0.3:
+            return
 
         # Create virtual obstacle!
         msg = PolygonStamped()
-        msg.header.stamp = rospy.Time.now() + t * 10.
+        msg.header.stamp = rospy.Time.now() + rospy.Duration(t)
         msg.polygon.points = [Point32(vo_x, vo_y, r)]
         self.__pub_hallucination.publish(msg)
 

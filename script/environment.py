@@ -80,18 +80,22 @@ class TestEpisode(GazeboController):
         comms_topics = [f'{robot.id}/amcl_pose' for robot in self.robots[::-1]]
 
         # teleport robot to init_pose
-        for _ in range(10):
+        for _ in range(5):
             for robot, init_pose in zip(self.robots, init_poses):
                 self.teleport(robot.id, *init_pose) # init_pose := (x,y,yaw)
             rospy.sleep(0.1)
 
-        # Localize robot, clear costmap and any remaining hallucinations
+        # Localize robot
         for _ in range(10):
             for robot, init_pose in zip(self.robots, init_poses):
                 robot.localize(*init_pose)
-            robot.clear_costmap()
-            robot.clear_hallucination()
-            rospy.sleep(0.1)
+        rospy.sleep(1.0)
+
+        # Clear costmap and hallucinations
+        for _ in range(10):
+            for robot in self.robots:
+                robot.clear_costmap()
+                robot.clear_hallucination()
         rospy.sleep(1.0)
 
         # Begin episode
