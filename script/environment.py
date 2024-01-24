@@ -63,49 +63,55 @@ class TestEpisode(GazeboController):
         self.episode_duration = rospy.Rate(1.)
 
     def reset(self, robot_modes, init_poses: list, goal_poses: list):
-        # cancel all previous episodes
-        self.unpause()
-        for _ in range(10):
-            for robot in self.robots:
-                robot.stop()
-                robot.clear_hallucination()
-            rospy.sleep(0.1)
+        while not rospy.is_shutdown():
+            # cancel all previous episodes
+            self.unpause()
+            for _ in range(10):
+                for robot in self.robots:
+                    robot.stop()
+                    robot.clear_hallucination()
+                rospy.sleep(0.1)
 
-        # Define new episode parameters
-        mirror = np.random.choice([True, False])
-        if mirror:
-            init_poses = init_poses[::-1]
-            goal_poses = goal_poses[::-1]
-        traffic = ('left' if np.random.choice([True, False]) else 'right')
-        comms_topics = [f'{robot.id}/amcl_pose' for robot in self.robots[::-1]]
+            # Define new episode parameters
+            mirror = np.random.choice([True, False])
+            if mirror:
+                init_poses = init_poses[::-1]
+                goal_poses = goal_poses[::-1]
+            traffic = ('left' if np.random.choice([True, False]) else 'right')
+            comms_topics = [f'{robot.id}/amcl_pose' for robot in self.robots[::-1]]
 
-        # teleport robot to init_pose
-        for _ in range(5):
-            for robot, init_pose in zip(self.robots, init_poses):
-                self.teleport(robot.id, *init_pose) # init_pose := (x,y,yaw)
-            rospy.sleep(0.1)
+            # teleport robot to init_pose
+            for _ in range(5):
+                for robot, init_pose in zip(self.robots, init_poses):
+                    self.teleport(robot.id, *init_pose) # init_pose := (x,y,yaw)
+                rospy.sleep(0.1)
 
-        # Localize robot
-        for _ in range(10):
-            for robot, init_pose in zip(self.robots, init_poses):
-                robot.localize(*init_pose)
-        rospy.sleep(1.0)
+            # Localize robot
+            for _ in range(10):
+                for robot, init_pose in zip(self.robots, init_poses):
+                    robot.localize(*init_pose)
+            rospy.sleep(1.0)
 
-        # Clear costmap and hallucinations
-        for _ in range(10):
-            for robot in self.robots:
-                robot.clear_costmap()
-                robot.clear_hallucination()
-        rospy.sleep(1.0)
+            # Clear costmap and hallucinations
+            for _ in range(10):
+                for robot in self.robots:
+                    robot.clear_costmap()
+                    robot.clear_hallucination()
+            rospy.sleep(1.0)
 
-        # Begin episode
-        for robot, comms_topic, mode, goal_pose in zip(self.robots, comms_topics, robot_modes, goal_poses):
-            robot.move(*goal_pose, timeout=60., mode=mode, traffic=traffic, comms_topic=comms_topic)
-        self.episode_duration.sleep()
+            # Begin episode
+            for robot, comms_topic, mode, goal_pose in zip(self.robots, comms_topics, robot_modes, goal_poses):
+                robot.move(*goal_pose, timeout=60., mode=mode, traffic=traffic, comms_topic=comms_topic)
+            self.episode_duration.sleep()
+            self.pause()
 
-        # Pause simulation after move_base actually moves
-        self.pause()
-        return self.robots[0].get_state()
+            # Check if robots actually moves
+            for robot, (x, y, _) in zip(self.robots, init_poses):
+                if (robot.pose.position.x - x)**2 + (robot.pose.position.y - y)**2 < 0.2:
+                    print(f"DEBUG: {robot.id} does not move! go back to reset process.")
+                    break
+            else:
+                return self.robots[0].get_state()
 
     def step(self, action):
         self.unpause()
@@ -228,6 +234,6 @@ if __name__ == '__main__':
             obs, rew, done = env.step(act)
             reward_hist += [rew]
 
-        print(f"\tEpisode {n+1}: {sum(reward_hist)}")
+        print(f"\tEpisode {n+1}:\n\t\treward: {sum(reward_hist)}\n\t\tTTD: {env.robots[0].ttd}")
         plt.plot(reward_hist)
     plt.savefig(f"{args.mode1}_{args.mode2}.png")

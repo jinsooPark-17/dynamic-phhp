@@ -346,7 +346,7 @@ class Agent(Movebase):
 
     def find_valid_plan(self, plan):
         if plan.size == 0:
-            return np.array([self.pose.position.x, self.pose.position.y])
+            return np.array([[self.pose.position.x, self.pose.position.y]])
         p = np.array([self.pose.position.x, self.pose.position.y])
         dist_to_robot = np.linalg.norm(plan-p, axis=1)
         valid_idx = np.argmin(dist_to_robot)
@@ -369,7 +369,7 @@ class Agent(Movebase):
 
         # State #2: plan
         curr_plan = self.find_valid_plan(self.curr_plan)
-        if self.prev_plan.size == 0:
+        if self.prev_plan.size == 0 or self.curr_plan.size == 0:
             hausdorff = 0.5
         else:
             prev_plan = self.find_valid_plan(self.prev_plan)
