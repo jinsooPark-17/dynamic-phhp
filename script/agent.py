@@ -139,7 +139,7 @@ class Agent(Movebase):
         super(Agent, self).__init__(id, map_frame)
 
         # Define internal parameters
-        self.radiis = radius
+        self.radius = radius
         self.pose = None
         self.map = Costmap(rospy.wait_for_message(os.path.join(id, 'move_base', 'global_costmap', 'costmap'), OccupancyGrid))
 
@@ -411,14 +411,14 @@ class Agent(Movebase):
             return
 
         # convert action to values
+        r = 0.2*r + 0.4                     # 0.2 ~ 0.6 meter
         x = (x+1.)/2. * self.sensor_horizon # 0. ~ sensor_horizon (default: 0 ~ 8m)
         y = 5 * r * y                       # -5r ~ 5r (default: -1.0 ~ 1.0 m)
-        t = (t+1.)*4.                       # 0.0 ~ 10.0 seconds
-        r = 0.2*r + 0.4                     # 0.2 ~ 0.6 meter
+        t = t * 5. + 10.                    # 5.0 ~ 15.0 seconds
 
         # Find target plan from [x] value
         curr_plan = self.find_valid_plan(self.curr_plan)
-        dist_to_robot = np.linalg.norm(curr_plan[1:] - curr_plan[:-1]).cumsum()
+        dist_to_robot = np.linalg.norm(curr_plan[1:] - curr_plan[:-1], axis=1).cumsum()
         target_plan_idx = np.searchsorted(dist_to_robot, x) + 1
 
         # Calculate center of virtual obstacle (vo)

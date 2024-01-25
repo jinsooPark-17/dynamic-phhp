@@ -259,9 +259,9 @@ if __name__ == '__main__':
         elif i==1:
             msg="Install VO 6 meters ahead that blocks center"
         elif i==2:
-            msg="Install VO 6 meters ahead that blocks left"
-        elif i==3:
             msg="Install VO 6 meters ahead that blocks right"
+        elif i==3:
+            msg="Install VO 6 meters ahead that blocks left"
         print(f"CASE {i+1}: {msg}")
 
         obs, done = env.reset(robot_modes=['vanilla', 'vanilla'], init_poses=init_poses, goal_poses=goal_poses), False
@@ -277,7 +277,7 @@ if __name__ == '__main__':
             plt.plot(ego_plan[:,0]*np.cos(ego_plan[:,1]), ego_plan[:,0]*np.sin(ego_plan[:,1]))
             plt.title(f"v: {obs['vw'][0]:.2f}, w: {obs['vw'][1]:.2f}")
             plt.xlim(-8.0, 8.0)
-            plt.ylim(-8.0, 8.0)
+            plt.ylim(-0.8, 0.8)
             plt.savefig("agent_state.png")
             rospy.sleep(0.001)
         print("Episode done")
