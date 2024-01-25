@@ -100,6 +100,7 @@ class TestEpisode(GazeboController):
             rospy.sleep(1.0)
 
             # Begin episode
+            self.episode_duration.sleep()   # wait for start line
             for robot, comms_topic, mode, goal_pose in zip(self.robots, comms_topics, robot_modes, goal_poses):
                 robot.move(*goal_pose, timeout=60., mode=mode, traffic=traffic, comms_topic=comms_topic)
             self.episode_duration.sleep()
@@ -107,7 +108,7 @@ class TestEpisode(GazeboController):
 
             # Check if robots actually moves
             for robot, (x, y, _) in zip(self.robots, init_poses):
-                if (robot.pose.position.x - x)**2 + (robot.pose.position.y - y)**2 < 0.2:
+                if (robot.pose.position.x - x)**2 + (robot.pose.position.y - y)**2 < 0.05:
                     print(f"DEBUG: {robot.id} does not move! go back to reset process.")
                     break
             else:
@@ -117,6 +118,7 @@ class TestEpisode(GazeboController):
         self.unpause()
         self.compute_deply_correction.sleep()
         # Do Hal-Agent action
+        self.robots[0].action(*action)
 
         # Finish action
         self.episode_duration.sleep()
@@ -206,17 +208,43 @@ class HallwayEpisode(GazeboController):
         self.pause()
 
 if __name__ == '__main__':
-    import argparse
-    import matplotlib.pyplot as plt
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode1",     type=str, choices=["vanilla", "baseline", "phhp", "dynamic"], required=True)
-    parser.add_argument("--mode2",     type=str, choices=["vanilla", "baseline", "phhp", "dynamic"], required=True)
-    parser.add_argument("--n_episode", type=int, required=True)
-    args = parser.parse_args()
+    # import matplotlib.pyplot as plt
+    # import argparse
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("--mode1",     type=str, choices=["vanilla", "baseline", "phhp", "dynamic"], required=True)
+    # parser.add_argument("--mode2",     type=str, choices=["vanilla", "baseline", "phhp", "dynamic"], required=True)
+    # parser.add_argument("--n_episode", type=int, required=True)
+    # args = parser.parse_args()
 
+    # env = TestEpisode(
+    #     num_scan_history=1, 
+    #     sensor_horizon=8.0, 
+    #     plan_interval=0.5
+    # )
+
+    # init_poses = [[-16.0, 0., 0.],
+    #               [-6.0, 0., np.pi]]
+    # goal_poses = [[-0., 0., 0.],
+    #               [-22.0, 0., np.pi]]
+    # print(f"Episode reward of {args.mode1}-{args.mode2} episodes")
+    # for n in range(args.n_episode):
+    #     obs, done = env.reset(robot_modes=[args.mode1, args.mode2], init_poses=init_poses, goal_poses=goal_poses), False
+    #     reward_hist = []
+
+    #     while not done:
+    #         act = np.random.rand(3)
+    #         obs, rew, done = env.step(act)
+    #         reward_hist += [rew]
+
+    #     print(f"\tEpisode {n+1}:\n\t\treward: {sum(reward_hist)}\n\t\tTTD: {env.robots[0].ttd}")
+    #     plt.plot(reward_hist[:-1])
+    # plt.savefig(f"{args.mode1}_{args.mode2}.png")
+
+    """ Test 2: check agent action """
+    import matplotlib.pyplot as plt
     env = TestEpisode(
-        num_scan_history=1, 
-        sensor_horizon=8.0, 
+        num_scan_history=1,
+        sensor_horizon=8.0,
         plan_interval=0.5
     )
 
@@ -224,16 +252,32 @@ if __name__ == '__main__':
                   [-6.0, 0., np.pi]]
     goal_poses = [[-0., 0., 0.],
                   [-22.0, 0., np.pi]]
-    print(f"Episode reward of {args.mode1}-{args.mode2} episodes")
-    for n in range(args.n_episode):
-        obs, done = env.reset(robot_modes=[args.mode1, args.mode2], init_poses=init_poses, goal_poses=goal_poses), False
-        reward_hist = []
 
-        while not done:
-            act = np.random.rand(3)
-            obs, rew, done = env.step(act)
-            reward_hist += [rew]
+    for i, action in enumerate([[-0.1, 0.5, 0.0, 0.0],[0.5, 0.5, 0.0, 0.0],[0.5, 0.5, 0.2, 0.0],[0.5, 0.5, -0.2, 0.0]]):
+        if i==0:
+            msg="Do not install"
+        elif i==1:
+            msg="Install VO 6 meters ahead that blocks center"
+        elif i==2:
+            msg="Install VO 6 meters ahead that blocks left"
+        elif i==3:
+            msg="Install VO 6 meters ahead that blocks right"
+        print(f"CASE {i+1}: {msg}")
 
-        print(f"\tEpisode {n+1}:\n\t\treward: {sum(reward_hist)}\n\t\tTTD: {env.robots[0].ttd}")
-        plt.plot(reward_hist)
-    plt.savefig(f"{args.mode1}_{args.mode2}.png")
+        obs, done = env.reset(robot_modes=['vanilla', 'vanilla'], init_poses=init_poses, goal_poses=goal_poses), False
+        obs, rew, done = env.step(action)
+        rospy.sleep(0.001)
+        for n in range(9):
+            obs, rew, done = env.step([-1.0, -1.0, -1.0, -1.0])
+            scan = obs['scan']
+            ego_plan = obs['plan']
+
+            plt.scatter(scan[0]*np.cos(env.robots[0].theta), scan[0]*np.sin(env.robots[0].theta), c='r', alpha=0.5, s=1)
+            plt.scatter(scan[1]*np.cos(env.robots[0].theta), scan[1]*np.sin(env.robots[0].theta), c='b', alpha=0.5, s=1)
+            plt.plot(ego_plan[:,0]*np.cos(ego_plan[:,1]), ego_plan[:,0]*np.sin(ego_plan[:,1]))
+            plt.title(f"v: {obs['vw'][0]:.2f}, w: {obs['vw'][1]:.2f}")
+            plt.xlim(-8.0, 8.0)
+            plt.ylim(-8.0, 8.0)
+            plt.savefig("agent_state.png")
+            rospy.sleep(0.001)
+        print("Episode done")

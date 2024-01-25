@@ -398,21 +398,23 @@ class Agent(Movebase):
         )
         return state
     
-    def action(self, valid, x, y, t, r=0.2):
+    def action(self, install, x, y, t, r=-1.0):
         # SOMETHING WIERD! RE-WRITE!
         """
-            valid: If True, install virtual obstacle with given (x, y, t, r) value.             [-1., 1.]
+            install: If True, install virtual obstacle with given (x, y, t, r) value.           [-1., 1.]
             x: proportion of target plan along the ego-centric plan divided by sensor horizon.  [-1., 1.]
             y: perpendicular distance from center of virtual circle to the target plan.         [-1., 1.]
             t: proportion of lifetime of virtual circle divided by max lifetime(default: 10.0). [-1., 1.]
+            r: radius of virtual circle.                                                        [-1., 1.]
         """
-        if valid < -0.:
+        if install < -0.:
             return
 
         # convert action to values
         x = (x+1.)/2. * self.sensor_horizon # 0. ~ sensor_horizon (default: 0 ~ 8m)
         y = 5 * r * y                       # -5r ~ 5r (default: -1.0 ~ 1.0 m)
-        t = (t+1.)*5.                       # 0.0 ~ 10.0 seconds
+        t = (t+1.)*4.                       # 0.0 ~ 10.0 seconds
+        r = 0.2*r + 0.4                     # 0.2 ~ 0.6 meter
 
         # Find target plan from [x] value
         curr_plan = self.find_valid_plan(self.curr_plan)
