@@ -138,6 +138,10 @@ class Agent(Movebase):
             radius=0.35):
         super(Agent, self).__init__(id, map_frame)
 
+        # Remove any temporary information before reference global costmap
+        self.clear_costmap()
+        rospy.sleep(0.5)
+
         # Define internal parameters
         self.radius = radius
         self.pose = None

@@ -5,6 +5,68 @@ from torch.distributions import Categorical
 torch.set_default_dtype(torch.float32)
 LOG2 = 0.6931471805599453
 
+class MLPActor(nn.Module):
+    def __init__(self, n_obs, n_act, hidden):
+        super().__init__()
+
+        layers = []
+        n_input = n_obs
+        for n_output in hidden[:-1]:
+            layers += [nn.Linear(n_input, n_output), nn.ReLU()]
+            n_input = n_output
+
+        self.net = nn.Sequential( layers )
+        self.mu_layer = nn.Linear(n_input, n_act)
+        self.log_std_layer = nn.Linear(n_input, n_act)
+
+    def forward(self, obs, deterministic=False, with_logprob=False):
+        x = self.net(obs)
+
+        # sample action from normal distribution
+        mu = self.mu_layer(x)
+        log_std = self.log_std_layer(x).clamp(-20.0, 2.0)
+        std = torch.exp(log_std)
+        pi_distribution = torch.distributions.normal.Normal(mu, std)
+
+        action = (mu if deterministic else pi_distribution.rsample())
+        if with_logprob:
+            logp = pi_distribution.log_prob(action).sum(axis=-1)
+            logp -= (2*(LOG2 - action - F.softplus(-2*action))).sum(axis=1)
+        else:
+            logp = None
+
+        action = torch.tanh(action).squeeze()
+        return action, logp
+class MLPQFunction(nn.Module):
+    def __init__(self, n_obs, n_act, hidden):
+        super().__init__()
+
+        layers = []
+        n_input = n_obs + n_act
+        for n_output in hidden[:-1]:
+            layers += [nn.Linear(n_input, n_output), nn.ReLU()]
+            n_input = n_output
+        layers += [nn.Linear(n_input, 1), nn.Identity()]
+
+        self.net = nn.Sequential( layers )
+
+    def forward(self, obs, act):
+        sa = torch.concat([obs, act], dim=-1)
+        q  = self.net(sa)
+        return torch.squeeze(q, -1)
+class MLPActorCritic(nn.Module):
+    def __init__(self, n_obs, n_act, hidden):
+        super().__init__()
+
+        self.pi = MLPActor(n_obs, n_act, hidden)
+        self.q1 = MLPQFunction(n_obs, n_act, hidden)
+        self.q2 = MLPQFunction(n_obs, n_act, hidden)
+
+    def act(self, obs, deterministic=False):
+        with torch.no_grad():
+            a, _ = self.pi(obs, deterministic, False)
+            return a.numpy()
+
 class Actor(nn.Module):
     def __init__(self, n_scan, n_plan, action_dim=3, combine=False):
         """
@@ -153,7 +215,12 @@ class ActorCritic(nn.Module):
         with torch.no_grad():
             a, _ = self.pi(obs, deterministic, False)
             return a.numpy()
-        
+
+    def load(self, model_path):
+        self.pi.load_state_dict(torch.load(f"{model_path}/pi"))
+        self.q1.load_state_dict(torch.load(f"{model_path}/q1"))
+        self.q2.load_state_dict(torch.load(f"{model_path}/q2"))
+
 if __name__ == '__main__':
     import time
     import numpy as np

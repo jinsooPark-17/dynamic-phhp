@@ -44,8 +44,8 @@ class GazeboController(object):
     def step(self):
         raise NotImplementedError()
 
-class TestEpisode(GazeboController):
-    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5):
+class HallwayEpisode(GazeboController):
+    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5, policy_hz=2):
         super().__init__()
         self.robots = [
             Agent(id = 'marvin', 
@@ -60,7 +60,7 @@ class TestEpisode(GazeboController):
 
         # Define episode control parameters
         self.compute_deply_correction = rospy.Rate(10.)
-        self.episode_duration = rospy.Rate(1.)
+        self.episode_duration = rospy.Rate(1./policy_hz)
 
     def reset(self, robot_modes, init_poses: list, goal_poses: list):
         while not rospy.is_shutdown():
@@ -71,6 +71,7 @@ class TestEpisode(GazeboController):
                     robot.stop()
                     robot.clear_hallucination()
                 rospy.sleep(0.1)
+            rospy.sleep(0.5)
 
             # Define new episode parameters
             mirror = np.random.choice([True, False])
@@ -85,6 +86,7 @@ class TestEpisode(GazeboController):
                 for robot, init_pose in zip(self.robots, init_poses):
                     self.teleport(robot.id, *init_pose) # init_pose := (x,y,yaw)
                 rospy.sleep(0.1)
+            rospy.sleep(0.5)
 
             # Localize robot
             for _ in range(10):
@@ -97,6 +99,7 @@ class TestEpisode(GazeboController):
                 for robot in self.robots:
                     robot.clear_costmap()
                     robot.clear_hallucination()
+                rospy.sleep(0.1)
             rospy.sleep(1.0)
 
             # Begin episode
@@ -112,12 +115,15 @@ class TestEpisode(GazeboController):
                     print(f"DEBUG: {robot.id} does not move! go back to reset process.")
                     break
             else:
-                return self.robots[0].get_state()
+                obs   = self.robots[0].get_state()
+                state = np.concatenate((obs['scan'], obs['plan'], obs['vw']), axis=None)
+                return state
 
     def step(self, action):
         self.unpause()
         self.compute_deply_correction.sleep()
-        # Do Hal-Agent action
+
+        # Do SOMETHING
         self.robots[0].action(*action)
 
         # Finish action
@@ -127,85 +133,19 @@ class TestEpisode(GazeboController):
         obs    = self.robots[0].get_state()
         done   = (not self.robots[0].is_running())
         reward = -obs['hausdorff_dist'] + 10.*self.robots[0].is_arrived()
-        return obs, reward, done
+        state  = np.concatenate((obs['scan'], obs['plan'], obs['vw']), axis=None)
+        return state, reward, done
 
-class HallwayEpisode(GazeboController):
-    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5, map_frame='level_mux_map'):
-        self.robots = [
-            Agent('marvin', num_scan_history, sensor_horizon, plan_interval, map_frame),
-            Agent('rob'   , num_scan_history, sensor_horizon, plan_interval, map_frame)
-        ]
-
-        # Define parameters
-        self.episode_mode = None
-        self.rate = rospy.Rate(1.)
-
-    def reset(self, opponent_type="vanilla", **kwargs):
-        # resume gazebo simulation
+    def close(self):
         self.unpause()
-        self.episode_mode = opponent_type
 
-        # Stop previous goals
         for robot in self.robots:
             robot.stop()
-        rospy.sleep(1.0)
-        
-        # Generate random episode
-        mirror_episode = bool(np.random.binomial(1, 0.5))
-        init_poses = np.zeros(2, 3)
-        goal_poses = np.zeros(2, 3)
+        rospy.sleep(0.1)
 
-        d = np.random.uniform(  9., 16.)
-        x = np.random.uniform(-22., -2.)
-
-        init_poses[0] = [x, 0., 0.]
-        if x+16 > 0:
-            goal_poses[0] = [0., -(x+16), -np.pi/2.]
-        else:
-            goal_poses[0] = [x+16., 0., 0.]
-
-        if x+d > 0.:
-            init_poses[1] = [0., -(x+d), np.pi/2.]
-        else:
-            init_poses[1] = [x+d, 0, np.pi]
-        goal_poses[1] = [x+d-16, 0, np.pi]
-
-        if mirror_episode is True:
-            init_poses = init_poses[::-1, :]
-            goal_poses = goal_poses[::-1, :]
-        
-        # teleport robots to their initial pose
-        for _ in range(2):
-            for robot, (x, y, yaw) in zip(self.robots, init_poses):
-                self.teleport(robot.id, x, y, yaw)
-        rospy.sleep(1.0)
-
-        # localize robots
-        for robot, (x, y, yaw) in zip(self.robots, init_poses):
-            robot.localize(x, y, yaw)
-        rospy.sleep(1.0)
-
-        # reset costmap and hallucination
         for robot in self.robots:
             robot.clear_costmap()
             robot.clear_hallucination()
-        rospy.sleep(1.0)
-
-        # Move robot to goal pose
-        self.robots[0].move(*goal_poses[0], mode='vanilla')
-        self.robots[1].move(*goal_poses[1], mode=self.episode_mode, **kwargs)
-        rospy.sleep(1.0)
-
-        # Pause simulation after move_base actually moves
-        self.pause()
-
-    def step(self, action):
-        self.unpause()
-
-        # DO SOMETHING
-
-        self.rate()
-        self.pause()
 
 if __name__ == '__main__':
     # import matplotlib.pyplot as plt
@@ -216,7 +156,7 @@ if __name__ == '__main__':
     # parser.add_argument("--n_episode", type=int, required=True)
     # args = parser.parse_args()
 
-    # env = TestEpisode(
+    # env = HallwayEpisode(
     #     num_scan_history=1, 
     #     sensor_horizon=8.0, 
     #     plan_interval=0.5
@@ -241,8 +181,50 @@ if __name__ == '__main__':
     # plt.savefig(f"{args.mode1}_{args.mode2}.png")
 
     """ Test 2: check agent action """
+    # import matplotlib.pyplot as plt
+    # env = HallwayEpisode(
+    #     num_scan_history=1,
+    #     sensor_horizon=8.0,
+    #     plan_interval=0.5
+    # )
+
+    # init_poses = [[-16.0, 0., 0.],
+    #               [-6.0, 0., np.pi]]
+    # goal_poses = [[-0., 0., 0.],
+    #               [-22.0, 0., np.pi]]
+
+    # for i, action in enumerate([[-0.1, 0.5, 0.0, 0.0],[0.5, 0.5, 0.0, 0.0],[0.5, 0.5, 0.2, 0.0],[0.5, 0.5, -0.2, 0.0]]):
+    #     if i==0:
+    #         msg="Do not install"
+    #     elif i==1:
+    #         msg="Install VO 6 meters ahead that blocks center"
+    #     elif i==2:
+    #         msg="Install VO 6 meters ahead that blocks right"
+    #     elif i==3:
+    #         msg="Install VO 6 meters ahead that blocks left"
+    #     print(f"CASE {i+1}: {msg}")
+
+    #     obs, done = env.reset(robot_modes=['vanilla', 'vanilla'], init_poses=init_poses, goal_poses=goal_poses), False
+    #     obs, rew, done = env.step(action)
+    #     rospy.sleep(0.001)
+    #     for n in range(9):
+    #         obs, rew, done = env.step([-1.0, -1.0, -1.0, -1.0])
+    #         scan = obs['scan']
+    #         ego_plan = obs['plan']
+
+    #         plt.figure()
+    #         plt.scatter(scan[0]*np.cos(env.robots[0].theta), scan[0]*np.sin(env.robots[0].theta), c='r', alpha=0.5, s=1)
+    #         plt.scatter(scan[1]*np.cos(env.robots[0].theta), scan[1]*np.sin(env.robots[0].theta), c='b', alpha=0.5, s=1)
+    #         plt.plot(ego_plan[:,0]*np.cos(ego_plan[:,1]), ego_plan[:,0]*np.sin(ego_plan[:,1]), c='k')
+    #         plt.title(f"v: {obs['vw'][0]:.2f}, w: {obs['vw'][1]:.2f}")
+    #         plt.savefig("agent_state.png")
+    #         plt.close()
+    #         rospy.sleep(0.001)
+    #     print("Episode done")
+
+    """ Test 3: check global costmap """
     import matplotlib.pyplot as plt
-    env = TestEpisode(
+    env1 = HallwayEpisode(
         num_scan_history=1,
         sensor_horizon=8.0,
         plan_interval=0.5
@@ -253,31 +235,17 @@ if __name__ == '__main__':
     goal_poses = [[-0., 0., 0.],
                   [-22.0, 0., np.pi]]
 
-    for i, action in enumerate([[-0.1, 0.5, 0.0, 0.0],[0.5, 0.5, 0.0, 0.0],[0.5, 0.5, 0.2, 0.0],[0.5, 0.5, -0.2, 0.0]]):
-        if i==0:
-            msg="Do not install"
-        elif i==1:
-            msg="Install VO 6 meters ahead that blocks center"
-        elif i==2:
-            msg="Install VO 6 meters ahead that blocks right"
-        elif i==3:
-            msg="Install VO 6 meters ahead that blocks left"
-        print(f"CASE {i+1}: {msg}")
+    s = env1.reset(robot_modes=['vanilla', 'vanilla'], init_poses=init_poses, goal_poses=goal_poses)
+    done = False
+    while not done:
+        ns, r, done = env1.step([-1.0, -1.0, -1.0, -1.0])
+        s = ns
+    
+    env2 = HallwayEpisode(
+        num_scan_history=1,
+        sensor_horizon=8.0,
+        plan_interval=0.5
+    )
 
-        obs, done = env.reset(robot_modes=['vanilla', 'vanilla'], init_poses=init_poses, goal_poses=goal_poses), False
-        obs, rew, done = env.step(action)
-        rospy.sleep(0.001)
-        for n in range(9):
-            obs, rew, done = env.step([-1.0, -1.0, -1.0, -1.0])
-            scan = obs['scan']
-            ego_plan = obs['plan']
-
-            plt.scatter(scan[0]*np.cos(env.robots[0].theta), scan[0]*np.sin(env.robots[0].theta), c='r', alpha=0.5, s=1)
-            plt.scatter(scan[1]*np.cos(env.robots[0].theta), scan[1]*np.sin(env.robots[0].theta), c='b', alpha=0.5, s=1)
-            plt.plot(ego_plan[:,0]*np.cos(ego_plan[:,1]), ego_plan[:,0]*np.sin(ego_plan[:,1]))
-            plt.title(f"v: {obs['vw'][0]:.2f}, w: {obs['vw'][1]:.2f}")
-            plt.xlim(-8.0, 8.0)
-            plt.ylim(-0.8, 0.8)
-            plt.savefig("agent_state.png")
-            rospy.sleep(0.001)
-        print("Episode done")
+    print(np.all(env1.robots[0].map.costmap == env2.robots[0].map.costmap))
+    print(env1.robots[0].map.costmap == env2.robots[0].map.costmap)

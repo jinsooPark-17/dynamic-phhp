@@ -190,9 +190,9 @@ class SAC:
         return q_info, pi_info, t_comm
 
     def save(self, network_dir):
-        torch.save(self.ac.pi.state_dict(), os.path.join(network_dir, "pi"))
-        torch.save(self.ac.q1.state_dict(), os.path.join(network_dir, "q1"))
-        torch.save(self.ac.q2.state_dict(), os.path.join(network_dir, "q2"))
+        torch.save(self.ac.pi.state_dict(), os.path.join(network_dir, "pi.pt"))
+        torch.save(self.ac.q1.state_dict(), os.path.join(network_dir, "q1.pt"))
+        torch.save(self.ac.q2.state_dict(), os.path.join(network_dir, "q2.pt"))
         torch.save(self.pi_optim.state_dict(), os.path.join(network_dir, "pi_optimizer"))
         torch.save(self.q_optim.state_dict(),  os.path.join(network_dir, "q_optimizer"))
 
