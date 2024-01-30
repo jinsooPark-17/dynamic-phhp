@@ -15,7 +15,7 @@ class MLPActor(nn.Module):
             layers += [nn.Linear(n_input, n_output), nn.ReLU()]
             n_input = n_output
 
-        self.net = nn.Sequential( layers )
+        self.net = nn.Sequential( *layers )
         self.mu_layer = nn.Linear(n_input, n_act)
         self.log_std_layer = nn.Linear(n_input, n_act)
 
@@ -35,7 +35,7 @@ class MLPActor(nn.Module):
         else:
             logp = None
 
-        action = torch.tanh(action).squeeze()
+        action = torch.tanh(action)
         return action, logp
 class MLPQFunction(nn.Module):
     def __init__(self, n_obs, n_act, hidden):
@@ -48,7 +48,7 @@ class MLPQFunction(nn.Module):
             n_input = n_output
         layers += [nn.Linear(n_input, 1), nn.Identity()]
 
-        self.net = nn.Sequential( layers )
+        self.net = nn.Sequential( *layers )
 
     def forward(self, obs, act):
         sa = torch.concat([obs, act], dim=-1)

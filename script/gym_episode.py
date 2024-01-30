@@ -9,17 +9,21 @@ if __name__ == '__main__':
     parser.add_argument("output_file_path", type=str, default="test")
     parser.add_argument("--network_dir", type=torch.load, required=True)
     parser.add_argument("--explore", action='store_true')
+    parser.add_argument("--debug", action='store_true')
     args = parser.parse_args()
 
-    env = gym.make("LunarLander-v2")
+    if args.debug:
+        env = gym.make("Pendulum-v1", render_mode='human')
+    else:
+        env = gym.make("Pendulum-v1")
     policy = MLPActor(n_obs=3, n_act=1, hidden=(128,128,))
-    policy.load(args.network_dir)
+    policy.load_state_dict(args.network_dir)
 
     # Define data storage
     episode_info = dict(
-        state = np.zeros(200,3),
-        action = np.zeros(200,1),
-        next_state = np.zeros(200,3),
+        state = np.zeros((200,3)),
+        action = np.zeros((200,1)),
+        next_state = np.zeros((200,3)),
         reward = np.zeros(200,),
         done = np.zeros(200,)
     )
@@ -30,6 +34,7 @@ if __name__ == '__main__':
             action = env.action_space.sample()
         else:
             with torch.no_grad():
+                state = torch.from_numpy(state).to(torch.float32)
                 action, _ = policy(state)
                 action = action.numpy()
         next_state, reward, terminated, truncated, _ = env.step(action)
