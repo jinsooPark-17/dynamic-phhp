@@ -94,7 +94,7 @@ if __name__ == '__main__':
         tensorboard.add_scalars("reward", {'test': r.sum()}, total_steps)
 
         # Save policy for every $SAVE_FREQUENCY epochs
-        if (epoch+1) % config["save_frequency"] == 0:
+        if (epoch+1) % config["save_freqency"] == 0:
             sac.save(os.path.join(MODEL_STORAGE, str(epoch+1)))
 
-        print(f"Epoch {epoch+1} took {time.time() - start_time:.2f} seconds.")
+        print(f"Epoch {epoch+1} took {time.time() - start_time:.2f} seconds.", flush=True)
