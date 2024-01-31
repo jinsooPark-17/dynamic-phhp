@@ -58,6 +58,5 @@ if __name__ == '__main__':
         action=episode_info['action'][:idx],
         next_state=episode_info['next_state'][:idx],
         reward=episode_info['reward'][:idx],
-        done=episode_info['done'][:idx]
-    ))
+        done=episode_info['done'][:idx]), args.output_file_path)
     env.close()
