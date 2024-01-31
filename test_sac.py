@@ -7,15 +7,15 @@ from torch.utils.tensorboard import SummaryWriter
 
 OBS_DIM = 3
 ACT_DIM = 1
-MODEL_DIR = "network"
+MODEL_PATH = "network"
 
-def run_episode(sample_path, model_path, explore=False):
-    args = []
+def run_episode(output_path, model_path, explore=False, test=False):
+    command = ["python3", "script/gym_episode.py", output_path, "--network_dir", model_path]
     if explore:
         args += ["--explore"]
-    return subprocess.Popen(
-        ["python3", "script/gym_episode.py", sample_path, "--network_dir", model_path, *args]
-    )
+    elif test:
+        args += ["--test"]
+    return subprocess.Popen(command)
 
 def load_data(sample_path):
     data = torch.load(sample_path)
@@ -40,34 +40,41 @@ if __name__ == '__main__':
     parser.add_argument("--update_after", type=int, default=1000)
     args = parser.parse_args()
 
+    tensorboard = SummaryWriter("tensorboard/test")
     replay = ReplayBuffer(obs_dim=OBS_DIM, act_dim=ACT_DIM, size=args.replay_size)
     sac = SAC(actor_critic=MLPActorCritic(n_obs=OBS_DIM, n_act=ACT_DIM, hidden=(256,256,256,)),
               gamma=args.gamma, polyak=args.polyak, lr=args.lr, alpha=args.alpha)
-    sac.save(MODEL_DIR)
+    sac.save(MODEL_PATH)
 
     # Main loop
     ## Run first episode
-    ep_proc = run_episode(sample_path='/tmp/sample.npz', model_path="network/pi.pt", explore=True)
+    ep_proc = run_episode(output_path='/tmp/sample.npz', model_path="network/pi.pt", explore=True)
     ep_proc.wait()
 
     total_steps = 0
-    while total_steps < 1e+5:
-        ep_proc = run_episode(sample_path='/tmp/sample.npz', model_path="network/pi.pt", explore=(True if total_steps < args.explore_steps else False))
+    for epoch in range(100):
+        while total_steps // 1000 == epoch:
+            ep_proc = run_episode(output_path='/tmp/sample.pt', model_path='network/pi.pt', explore=(True if total_steps < args.explore_steps else False))
 
-        s, a, ns, r, d = load_data("/tmp/sample.npz")
-        replay.store(s, a, ns, r, d)
-        ep_len, ep_rew = r.size(0), r.sum()
-        total_steps += ep_len
+            # Store episode information to replay buffer and tensorboard
+            s, a, ns, r, d = load_data('tmp/sample.pt')
+            ep_len = replay.store(s, a, ns, r, d)
+            total_steps += ep_len
+            tensorboard.add_scalar('train_ep_reward', r.sum(), total_steps)
 
-        print(f"Episode reward: {ep_rew}")  # LOG
+            if total_steps > args.update_after:
+                for k in range(total_steps-ep_len, total_steps):
+                    q_info, pi_info = sac.update(batch=replay.sample_batch(args.batch_size))
+                    tensorboard.add_scalar("Loss_pi", pi_info.detach().item(), k)
+                    tensorboard.add_scalar("Loss_Q", q_info.detach().item(), k)
+                sac.save(MODEL_PATH)
+            
+            # wait for the next episode
+            ep_proc.wait()
 
-        if total_steps > args.update_after:
-            for k in range(ep_len):
-                q_info, pi_info = sac.update(batch=replay.sample_batch(args.batch_size))
-                print('\t', q_info, pi_info)
-
-            # Save new model
-            sac.save(MODEL_DIR)
-
-        # wait for the next episode
+        # When one episode ends, run test episode
+        ep_proc = run_episode(output_path='/tmp/test_sample.pt', model_path='network/pi.pt', test=True)
         ep_proc.wait()
+        _, _, _, r, d = load_data('tmp/test_sample.pt')
+        tensorboard.add_scalar("test_ep_reward", r.sum(), epoch+1)
+        print(f"{epoch+1}: {r.sum():.2f}")
