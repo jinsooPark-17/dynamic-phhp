@@ -21,11 +21,11 @@ if __name__ == '__main__':
     policy = MLPActor(n_obs=3, n_act=1, hidden=(256,256,256,))
 
     # Define data storage
-    state = torch.zeros((200,3), dtype=torch.float32)
-    action = torch.zeros((200,1), dtype=torch.float32)
-    next_state = torch.zeros_like(state, dtype=torch.float32)
-    reward = torch.zeros((200,), dtype=torch.float32)
-    done = torch.zeros((200,), dtype=torch.float32)
+    state = np.zeros((200,3))
+    action = np.zeros((200,1))
+    next_state = np.zeros_like(state)
+    reward = np.zeros((200,))
+    done = np.zeros((200,))
 
     try:
         while True:
@@ -61,11 +61,11 @@ if __name__ == '__main__':
                 idx += 1
 
             # Store episode info as a file
-            episode_info = dict(state=state[:idx],
-                                action=action[:idx],
-                                next_state=next_state[:idx],
-                                reward=reward[:idx],
-                                done=done[:idx])
+            episode_info = dict(state=torch.from_numpy(state[:idx]).to(torch.float32),
+                                action=torch.from_numpy(action[:idx]).to(torch.float32),
+                                next_state=torch.from_numpy(next_state[:idx]).to(torch.float32),
+                                reward=torch.from_numpy(reward[:idx]).to(torch.float32),
+                                done=torch.from_numpy(done[:idx])).to(torch.float32),
             torch.save(episode_info, args.output_file_path)
     finally:
         env.close()
