@@ -1,14 +1,16 @@
-import argparse
+import os
+import time
 import torch
 import numpy as np
+import argparse
 import gymnasium as gym
 from network import MLPActor
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("output_file_path", type=str, default="test")
-    parser.add_argument("--network_dir", type=torch.load, required=True)
-    parser.add_argument("--explore", action='store_true')
+    parser.add_argument("--network_dir", type=str, required=True)
+    parser.add_argument("--explore_flag", type=str)
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--debug", action='store_true')
     args = parser.parse_args()
@@ -18,45 +20,51 @@ if __name__ == '__main__':
     else:
         env = gym.make("Pendulum-v1")
     policy = MLPActor(n_obs=3, n_act=1, hidden=(256,256,256,))
-    policy.load_state_dict(args.network_dir)
 
-    # Define data storage
-    episode_info = dict(
-        state = np.zeros((200,3)),
-        action = np.zeros((200,1)),
-        next_state = np.zeros((200,3)),
-        reward = np.zeros(200,),
-        done = np.zeros(200,)
-    )
+    try:
+        while True:
+            while os.path.exists(args.output_file_path):
+                time.sleep(0.1)
+            policy.load_state_dict(torch.load(args.network_dir))
 
-    (state, _), done, idx = env.reset(), False, 0
-    while not done:
-        if args.explore:
-            action = env.action_space.sample()
-        else:
-            with torch.no_grad():
-                state = torch.from_numpy(state).to(torch.float32)
-                action, _ = policy(state, deterministic=args.test)
-                action = action.numpy()
-        next_state, reward, terminated, truncated, _ = env.step(2.*action)
-        done = (terminated or truncated)
+            # Define data storage
+            episode_info = dict(
+                state = np.zeros((200,3)),
+                action = np.zeros((200,1)),
+                next_state = np.zeros((200,3)),
+                reward = np.zeros(200,),
+                done = np.zeros(200,)
+            )
 
-        # Store SAS'RD
-        episode_info['state'][idx]      = state
-        episode_info['action'][idx]     = action
-        episode_info['next_state'][idx] = next_state
-        episode_info['reward'][idx]     = reward
-        episode_info['done'][idx]       = done
+            (state, _), done, idx = env.reset(), False, 0
+            while not done:
+                if os.path.exists(args.explore_flag):
+                    action = env.action_space.sample()
+                else:
+                    with torch.no_grad():
+                        state = torch.from_numpy(state).to(torch.float32)
+                        action, _ = policy(state, deterministic=args.test)
+                        action = action.numpy()
+                next_state, reward, terminated, truncated, _ = env.step(2.*action)
+                done = (terminated or truncated)
 
-        # Update
-        state = next_state
-        idx += 1
+                # Store SAS'RD
+                episode_info['state'][idx]      = state
+                episode_info['action'][idx]     = action
+                episode_info['next_state'][idx] = next_state
+                episode_info['reward'][idx]     = reward
+                episode_info['done'][idx]       = done
 
-    # Store episode info as a file
-    torch.save(dict(
-        state=episode_info['state'][:idx],
-        action=episode_info['action'][:idx],
-        next_state=episode_info['next_state'][:idx],
-        reward=episode_info['reward'][:idx],
-        done=episode_info['done'][:idx]), args.output_file_path)
-    env.close()
+                # Update
+                state = next_state
+                idx += 1
+
+            # Store episode info as a file
+            torch.save(dict(
+                state=episode_info['state'][:idx],
+                action=episode_info['action'][:idx],
+                next_state=episode_info['next_state'][:idx],
+                reward=episode_info['reward'][:idx],
+                done=episode_info['done'][:idx]), args.output_file_path)
+    finally:
+        env.close()

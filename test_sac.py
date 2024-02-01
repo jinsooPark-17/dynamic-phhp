@@ -19,6 +19,7 @@ def run_episode(output_path, model_path, explore=False, test=False):
 
 def load_data(sample_path):
     data = torch.load(sample_path)
+    os.remove(sample_path)
     return (torch.from_numpy(data['state']).to(torch.float32), 
             torch.from_numpy(data['action']).to(torch.float32), 
             torch.from_numpy(data['next_state']).to(torch.float32), 
@@ -43,6 +44,9 @@ if __name__ == '__main__':
     TEST_EPISODE  = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
     TRAIN_EPISODE = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
     LOG_DIR       = os.path.join("results", SLURM_JOBID, "tensorboard")
+    EXPLORE_CMD   = os.path.join("commands", f"{SLURM_JOBID}.explore")
+    if not os.path.exists("commands"):
+        os.makedirs("commands")
 
     # Prepare training
     tensorboard = SummaryWriter(LOG_DIR)
@@ -56,25 +60,33 @@ if __name__ == '__main__':
     sac.save(MODEL_STORAGE)
 
     # Main loop
-    ## Run first pure exploration episode & test episode
-    train_episode = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore=True)
-    train_episode.wait()
+    ## Run infinite looping episode
+    with open(EXPLORE_CMD, 'w') as f:
+        pass
+    train_ep_proc = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore_flag=EXPLORE_CMD)
+    test_ep_proc  = run_episode(output_path=TEST_EPISODE,  model_path=MODEL, explore_flag=EXPLORE_CMD)
+    while not os.path.exists(TRAIN_EPISODE):
+        time.sleep(0.01)
 
+    explore = True
     total_steps = 0
     for epoch in range(config["epoch"]):
         start_time = time.time()
         while total_steps // config["steps_per_epoch"] == epoch:
             # Begin episode
-            if total_steps < config["train"]["explore_steps"]:
-                train_episode = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore=True)
-            else:
-                train_episode = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore=False)
+            if explore is True and total_steps >= config["train"]["explore_steps"]:
+                explore = False
+                os.remove(EXPLORE_CMD)
+
+            # Wait for the new episode
+            while not os.path.exists(TRAIN_EPISODE):
+                time.sleep(0.01)
 
             # Use previous episode to train policy
             s, a, ns, r, d = load_data(TRAIN_EPISODE)
             ep_len = replay.store(s, a, ns, r, d)
             total_steps += ep_len
-            tensorboard.add_scalars('reward', {'train': r.sum()}, total_steps)
+            tensorboard.add_scalars("reward", {"train": r.sum()}, total_steps)
 
             if total_steps > config["train"]["update_after"]:
                 for k in range(total_steps-ep_len, total_steps):
@@ -83,18 +95,20 @@ if __name__ == '__main__':
                     tensorboard.add_scalar("Loss/Pi", pi_info.detach().item(), k)
                     tensorboard.add_scalar("Loss/Q",  q_info.detach().item(), k)
                 sac.save(MODEL_STORAGE)
-            
-            # Wait for the next episode
-            train_episode.wait()
 
+        """ No test recording with (Loop-episode + No MPI)
         # For each Epoch, run test episode to show training progress
         test_episode = run_episode(output_path=TEST_EPISODE, model_path=MODEL, test=True)
         test_episode.wait()
-        _, _, _, r, d = load_data(TEST_EPISODE)
-        tensorboard.add_scalars("reward", {'test': r.sum()}, total_steps)
-
+        _, _, _, r, _ = load_data(TEST_EPISODE)
+        tensorboard.add_scalars("reward", {"test": r.sum()}, total_steps)
+        """
         # Save policy for every $SAVE_FREQUENCY epochs
         if (epoch+1) % config["save_freqency"] == 0:
             sac.save(os.path.join(MODEL_STORAGE, str(epoch+1)))
 
         print(f"Epoch {epoch+1} took {time.time() - start_time:.2f} seconds.", flush=True)
+
+    tensorboard.close()
+    train_ep_proc.kill()
+    # test_episode.kill()
