@@ -9,10 +9,10 @@ from script.network import MLPActorCritic
 from rl.sac import ReplayBuffer, SAC
 from torch.utils.tensorboard import SummaryWriter
 
-def run_episode(output_path, model_path, explore=False, test=False):
+def run_episode(output_path, model_path, explore=None, test=False):
     commands = ["python3", "script/gym_episode.py", output_path, "--network_dir", model_path]
-    if explore:
-        commands += ["--explore"]
+    if not explore is None:
+        commands += ["--explore", explore]
     elif test:
         commands += ["--test"]
     return subprocess.Popen(commands)
@@ -20,11 +20,7 @@ def run_episode(output_path, model_path, explore=False, test=False):
 def load_data(sample_path):
     data = torch.load(sample_path)
     os.remove(sample_path)
-    return (torch.from_numpy(data['state']).to(torch.float32), 
-            torch.from_numpy(data['action']).to(torch.float32), 
-            torch.from_numpy(data['next_state']).to(torch.float32), 
-            torch.from_numpy(data['reward']).to(torch.float32), 
-            torch.from_numpy(data['done']).to(torch.float32))
+    return data['state'], data['action'], data['next_state'], data['reward'], data['done']
 
 if __name__ == '__main__':
     # Define argument parser
@@ -44,10 +40,8 @@ if __name__ == '__main__':
     TEST_EPISODE  = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
     TRAIN_EPISODE = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
     LOG_DIR       = os.path.join("results", SLURM_JOBID, "tensorboard")
-    EXPLORE_CMD   = os.path.join("commands", f"{SLURM_JOBID}.explore")
-    if not os.path.exists("commands"):
-        os.makedirs("commands")
-
+    EXPLORE_CMD   = os.path.join("results", SLURM_JOBID, "explore.command")
+    
     # Prepare training
     tensorboard = SummaryWriter(LOG_DIR)
     sac = SAC(actor_critic=MLPActorCritic(n_obs=config["policy"]["obs_dim"], n_act=config["policy"]["act_dim"], hidden=(256,256,256,)),
@@ -63,8 +57,8 @@ if __name__ == '__main__':
     ## Run infinite looping episode
     with open(EXPLORE_CMD, 'w') as f:
         pass
-    train_ep_proc = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore_flag=EXPLORE_CMD)
-    test_ep_proc  = run_episode(output_path=TEST_EPISODE,  model_path=MODEL, explore_flag=EXPLORE_CMD)
+    train_ep_proc = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore=EXPLORE_CMD)
+    test_ep_proc  = run_episode(output_path=TEST_EPISODE,  model_path=MODEL, explore=EXPLORE_CMD)
     while not os.path.exists(TRAIN_EPISODE):
         time.sleep(0.01)
 
