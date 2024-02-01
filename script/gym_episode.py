@@ -1,6 +1,7 @@
 import os
 import time
 import torch
+import numpy as np
 import argparse
 import gymnasium as gym
 from network import MLPActor
@@ -65,7 +66,7 @@ if __name__ == '__main__':
                                 action=torch.from_numpy(action[:idx]).to(torch.float32),
                                 next_state=torch.from_numpy(next_state[:idx]).to(torch.float32),
                                 reward=torch.from_numpy(reward[:idx]).to(torch.float32),
-                                done=torch.from_numpy(done[:idx])).to(torch.float32),
+                                done=torch.from_numpy(done[:idx]).to(torch.float32))
             torch.save(episode_info, args.output_file_path)
     finally:
         env.close()
