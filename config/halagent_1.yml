@@ -1,0 +1,33 @@
+epoch: 100
+steps_per_epoch: 1000
+
+SAC:
+  gamma: 0.99
+  polyak: 0.005
+  lr: 0.001
+  alpha: 0.2
+
+policy:
+  n_scan: 1
+  sensor_horizon: 8.0
+  plan_interval: 0.5
+  act_dim: 4
+  # act_dim: 5
+  combine_scans: True
+  policy_hz: None
+
+episode:
+  timeout: 60.0
+  opponents:
+    - vanilla
+    - baseline
+    - phhp
+
+train:
+  explore_steps: 15000
+  update_after: 5000
+  replay_size: 30000
+  batch_size: 32
+
+n_test: 1
+save_freqency: 1
