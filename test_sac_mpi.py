@@ -36,11 +36,12 @@ if __name__ == '__main__':
     # Define data storage
     TASK_UUID     = str(uuid.uuid4())
     SLURM_JOBID   = os.getenv("SLURM_JOBID", default='test')
-    MODEL_STORAGE = os.path.join("results", SLURM_JOBID, "network")
-    MODEL         = os.path.join("results", SLURM_JOBID, "network", "pi.pt")
+    STORAGE       = os.path.join("results", SLURM_JOBID)
+    MODEL_STORAGE = os.path.join(STORAGE, "network")
+    MODEL         = os.path.join(STORAGE, "network", "pi.pt")
     EPISODE_DATA  = os.path.join(os.sep, "dev", "shm", f"{TASK_UUID}.pt")
-    LOG_DIR       = os.path.join("results", SLURM_JOBID, "tensorboard")
-    EXPLORE_CMD   = os.path.join("results", SLURM_JOBID, "explore.command")
+    LOG_DIR       = os.path.join(STORAGE, "tensorboard")
+    EXPLORE_CMD   = os.path.join(STORAGE, "explore.command")
     
     # Initialize MPI
     comm = MPI.COMM_WORLD
@@ -64,6 +65,8 @@ if __name__ == '__main__':
         sac = SAC(actor_critic=MLPActorCritic(n_obs=config["policy"]["obs_dim"], n_act=config["policy"]["act_dim"], hidden=(256,256,256,)),
                 gamma=config["SAC"]["gamma"], polyak=config["SAC"]["polyak"], lr=config["SAC"]["lr"], alpha=config["SAC"]["alpha"])
         sac.save(MODEL_STORAGE)
+        with open(os.path.join(STORAGE, "config.yml"), 'w') as f:
+            yaml.dump(config, f)
 
         # All episode starts with pure exploration episodes
         with open(EXPLORE_CMD, 'w') as f:
