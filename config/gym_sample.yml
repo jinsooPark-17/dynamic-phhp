@@ -1,5 +1,5 @@
 epoch: 100
-steps_per_epoch: 2000
+steps_per_epoch: 4000
 
 policy:
   obs_dim: 3
@@ -7,10 +7,10 @@ policy:
   policy_hz: None
 
 train:
-  explore_steps: 8000
-  update_after: 2000
+  explore_steps: 15000
+  update_after: 5000
   replay_size: 30000
-  batch_size: 32
+  batch_size: 320
 
 SAC:
   gamma: 0.99

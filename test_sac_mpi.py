@@ -38,7 +38,7 @@ if __name__ == '__main__':
     SLURM_JOBID   = os.getenv("SLURM_JOBID", default='test')
     MODEL_STORAGE = os.path.join("results", SLURM_JOBID, "network")
     MODEL         = os.path.join("results", SLURM_JOBID, "network", "pi.pt")
-    EPISODE_DATA  = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
+    EPISODE_DATA  = os.path.join(os.sep, "dev", "shm", f"{TASK_UUID}.pt")
     LOG_DIR       = os.path.join("results", SLURM_JOBID, "tensorboard")
     EXPLORE_CMD   = os.path.join("results", SLURM_JOBID, "explore.command")
     
@@ -48,8 +48,8 @@ if __name__ == '__main__':
     rank = comm.Get_rank()
     ROOT = 0
 
-    LOCAL_BATCH_SIZE  = int(config["train"]["batch_size"] / size) + 1
-    LOCAL_REPLAY_SIZE = int(config["train"]["replay_size"] / size) + 1
+    LOCAL_BATCH_SIZE  = int(config["train"]["batch_size"] / size)
+    LOCAL_REPLAY_SIZE = int(config["train"]["replay_size"] / size)
 
     tensorboard = (SummaryWriter(LOG_DIR) if rank==ROOT else None)
 
@@ -88,13 +88,14 @@ if __name__ == '__main__':
         start_time = time.time()
         while total_steps // config["steps_per_epoch"] == epoch:
             # Begin episode
-            if command is True and rank == ROOT and total_steps >= config["train"]["explore_steps"]:
+            if command is True and total_steps >= config["train"]["explore_steps"]:
                 command = False
                 os.remove(EXPLORE_CMD)
 
             # Wait for the new episode
             while not os.path.exists(EPISODE_DATA):
                 time.sleep(0.01)
+            time.sleep(0.5) # wait for file creation routine to successfully ended.
 
             # Use previous episode to train policy
             s, a, ns, r, d = load_data(EPISODE_DATA)
@@ -111,11 +112,11 @@ if __name__ == '__main__':
             if total_steps > config["train"]["update_after"]:
                 loss = torch.zeros((ep_steps, 2), dtype=torch.float64)
                 # Train ep_steps step
-                for k in range(total_steps-ep_steps, total_steps):
+                for n in range(ep_steps):
                     batch = replay.sample_batch(LOCAL_BATCH_SIZE)
                     q_info, pi_info, _ = sac.update_mpi(batch=batch, comm=comm)
-                    loss[k,0] = pi_info.detach().item()
-                    loss[k,1] = q_info.detach().item()
+                    loss[n,0] = torch.from_numpy(pi_info["LossPi"])
+                    loss[n,1] = torch.from_numpy(q_info["LossQ"])
 
                 # Get average loss
                 total_loss = (torch.zeros_like(loss) if rank==ROOT else None)
@@ -125,9 +126,9 @@ if __name__ == '__main__':
                 if rank == ROOT:
                     sac.save(MODEL_STORAGE)
                     total_loss = total_loss / size
-                    for k in range(total_steps-ep_steps, total_steps):
-                        tensorboard.add_scalar("Loss/Pi", total_loss[k,0], k)
-                        tensorboard.add_scalar("Loss/Q",  total_loss[k,1], k)
+                    for n, global_step in enumerate(range(total_steps-ep_steps, total_steps)):
+                        tensorboard.add_scalar("Loss/Pi", total_loss[n,0], global_step)
+                        tensorboard.add_scalar("Loss/Q",  total_loss[n,1], global_step)
                 comm.Barrier()
 
         # 
@@ -148,4 +149,3 @@ if __name__ == '__main__':
     if rank == ROOT:
         tensorboard.close()
     ep_proc.kill()
-    
