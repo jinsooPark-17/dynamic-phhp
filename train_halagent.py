@@ -24,11 +24,9 @@ def launch_simulation(uuid, args=''):
             return
     raise RuntimeError("Simulation failed to launched after 10 trials. Stop training process.")
 
-def run_episode(output_path, model_path, explore=None, test=False):
-    commands = ["python3", "script/halagent_episode.py", output_path, "--network_dir", model_path]
-    if not explore is None:
-        commands += ["--explore", explore]
-    elif test:
+def run_episode(output_path, model_path, config_path, command, test=False):
+    commands = ["python3", "script/halagent_episode.py", output_path, "--network_dir", model_path, "--config", config_path, "--command", command]
+    if test is True:
         commands += ["--test"]
     return subprocess.Popen(commands)
 
@@ -61,13 +59,14 @@ if __name__ == '__main__':
     # Define data storage
     TASK_UUID     = str(uuid.uuid4())
     SLURM_JOBID   = os.getenv("SLURM_JOBID", default='test')
-    MODEL_STORAGE = os.path.join("results", SLURM_JOBID, "network")
-    MODEL         = os.path.join("results", SLURM_JOBID, "network", "pi.pt")
+    DATA_STORAGE  = os.path.join("results", SLURM_JOBID)
+    MODEL_STORAGE = os.path.join(DATA_STORAGE, "network")
+    MODEL         = os.path.join(DATA_STORAGE, "network", "pi.pt")
     TEST_EPISODE  = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
     TRAIN_EPISODE = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
-    LOG_DIR       = os.path.join("results", SLURM_JOBID, "tensorboard")
-    EXPLORE_CMD   = os.path.join("results", SLURM_JOBID, "explore.command")
-    
+    LOG_DIR       = os.path.join(DATA_STORAGE, "tensorboard")
+    EXPLORE_CMD   = os.path.join(DATA_STORAGE, "explore.command")
+
     # Prepare training
     tensorboard = SummaryWriter(LOG_DIR)
     actor_critic = ActorCritic(n_scan=config["policy"]["n_scan"],
@@ -98,7 +97,10 @@ if __name__ == '__main__':
     with open(EXPLORE_CMD, 'w') as f:
         pass
     ## Run infinite looping episode
-    train_ep_proc = run_episode(output_path=TRAIN_EPISODE, model_path=MODEL, explore=EXPLORE_CMD)
+    train_ep_proc = run_episode(output_path=TRAIN_EPISODE, 
+                                model_path=MODEL,
+                                config_path=args.config,
+                                command=DATA_STORAGE)
     while not os.path.exists(TRAIN_EPISODE):
         time.sleep(0.01)
 

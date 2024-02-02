@@ -54,6 +54,7 @@ class MLPQFunction(nn.Module):
         sa = torch.concat([obs, act], dim=-1)
         q  = self.net(sa)
         return torch.squeeze(q, -1)
+
 class MLPActorCritic(nn.Module):
     def __init__(self, n_obs, n_act, hidden):
         super().__init__()
