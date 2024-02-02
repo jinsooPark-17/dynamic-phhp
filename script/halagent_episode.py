@@ -43,14 +43,14 @@ if __name__=='__main__':
 
     # Define constant
     N_PLAN = int(args.sensor_horizon/args.plan_interval * 2.)
-    N_STATE = 2*args.n_scan*640 + N_PLAN + 2        # scan / plan / vw
+    N_STATE = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2        # scan / plan / vw
     MAX_SAMPLES = int(config["episode"]["timeout"] * args.policy_hz) + 1
 
     env = HallwayEpisode(
-        num_scan_history=config["n_scan"], 
-        sensor_horizon=config["sensor_horizon"], 
-        plan_interval=config["plan_interval"], 
-        policy_hz=config["policy_hz"]
+        num_scan_history=config["policy"]["n_scan"], 
+        sensor_horizon=config["policy"]["sensor_horizon"], 
+        plan_interval=config["policy"]["plan_interval"], 
+        policy_hz=config["policy"]["policy_hz"]
     )
     policy = ActorCritic(
         n_scan=config["n_scan"],

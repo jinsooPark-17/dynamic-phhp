@@ -53,7 +53,8 @@ if __name__ == '__main__':
     with open(args.config) as f:
         config = yaml.safe_load(f)
     N_PLAN = int(config["policy"]["sensor_horizon"]/config["policy"]["plan_interval"]*2.)
-    config['n_plan'] = N_PLAN
+    config["policy"]["n_plan"] = N_PLAN
+    config["policy"]["obs_dim"] = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2
     choose_opponent = random_opponent(config["episode"]["opponents"])
 
     # Define data storage
@@ -74,7 +75,7 @@ if __name__ == '__main__':
                                action_dim=config["policy"]["act_dim"],
                                combine=config["policy"]["combine_scans"])
 
-    sac = SAC(actor_critic=ac,
+    sac = SAC(actor_critic=actor_critic,
               gamma=config["SAC"]["gamma"], 
               polyak=config["SAC"]["polyak"], 
               lr=config["SAC"]["lr"], 
