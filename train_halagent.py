@@ -25,7 +25,7 @@ def launch_simulation(uuid, args=''):
     raise RuntimeError("Simulation failed to launched after 10 trials. Stop training process.")
 
 def run_episode(uuid, output_path, model_path, config_path, command, test=False):
-    commands = ["singularity", "run", f"instance://{uuid}", "python3", "script/halagent_episode.py", output_path, "--network_dir", model_path, "--config", config_path, "--command", command]
+    commands = ["singularity", "run", f"instance://{uuid}", "python3.7", "script/halagent_episode.py", output_path, "--network_dir", model_path, "--config", config_path, "--command", command]
     if test is True:
         commands += ["--test"]
     return subprocess.Popen(commands)
