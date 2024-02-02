@@ -24,8 +24,8 @@ def launch_simulation(uuid, args=''):
             return
     raise RuntimeError("Simulation failed to launched after 10 trials. Stop training process.")
 
-def run_episode(output_path, model_path, config_path, command, test=False):
-    commands = ["python3", "script/halagent_episode.py", output_path, "--network_dir", model_path, "--config", config_path, "--command", command]
+def run_episode(uuid, output_path, model_path, config_path, command, test=False):
+    commands = ["singularity", "run", f"instance://{uuid}", "python3", "script/halagent_episode.py", output_path, "--network_dir", model_path, "--config", config_path, "--command", command]
     if test is True:
         commands += ["--test"]
     return subprocess.Popen(commands)
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     sac.save(MODEL_STORAGE)
 
     # Launch simulation
-    time.sleep( torch.rand(1)*10 )
+    time.sleep( torch.rand(1).item()*10 )
     launch_simulation(uuid=TASK_UUID, args='gui:=true')
 
     # Main loop
@@ -98,7 +98,8 @@ if __name__ == '__main__':
     with open(EXPLORE_CMD, 'w') as f:
         pass
     ## Run infinite looping episode
-    train_ep_proc = run_episode(output_path=TRAIN_EPISODE, 
+    train_ep_proc = run_episode(uuid=TASK_UUID,
+                                output_path=TRAIN_EPISODE, 
                                 model_path=MODEL,
                                 config_path=args.config,
                                 command=DATA_STORAGE)
