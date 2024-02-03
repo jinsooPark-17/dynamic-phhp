@@ -5,11 +5,11 @@ import argparse
 import numpy as np
 import torch
 from environment import HallwayEpisode
-from network import ActorCritic
+from network import Actor
 
 def generate_random_episode():
-    init_poses = np.zeros(2, 3)
-    goal_poses = np.zeros(2, 3)
+    init_poses = np.zeros((2, 3))
+    goal_poses = np.zeros((2, 3))
 
     d = np.random.uniform(  9., 16.)
     x = np.random.uniform(-22., -2.)
@@ -29,10 +29,10 @@ def generate_random_episode():
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("output_file_path", type=str, default='test', required=True)
+    parser.add_argument("output_file_path", type=str, default='test')
     parser.add_argument("--network_dir", type=str, required=True)
     parser.add_argument("--config", type=str, help="configuration file *.yml", required=True)
-    parser.add_argument("--command", type=str)
+    parser.add_argument("--commands", type=str)
     parser.add_argument("--test", action='store_true',
                         help="Activate when testing a trained policy.")
     args = parser.parse_args()
@@ -42,9 +42,9 @@ if __name__=='__main__':
         config = yaml.safe_load(f)
 
     # Define constant
-    N_PLAN = int(args.sensor_horizon/args.plan_interval * 2.)
+    N_PLAN = int(config["policy"]["sensor_horizon"]/config["policy"]["plan_interval"] * 2.)
     N_STATE = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2        # scan / plan / vw
-    MAX_SAMPLES = int(config["episode"]["timeout"] * args.policy_hz) + 1
+    MAX_SAMPLES = int(config["episode"]["timeout"] * config["policy"]["policy_hz"]) + 1
 
     env = HallwayEpisode(
         num_scan_history=config["policy"]["n_scan"], 
@@ -52,18 +52,18 @@ if __name__=='__main__':
         plan_interval=config["policy"]["plan_interval"], 
         policy_hz=config["policy"]["policy_hz"]
     )
-    policy = ActorCritic(
-        n_scan=config["n_scan"],
+    policy = Actor(
+        n_scan=config["policy"]["n_scan"],
         n_plan=N_PLAN,
-        action_dim=config["act_dim"],
-        combine=config["combine_scans"]
+        action_dim=config["policy"]["act_dim"],
+        combine=config["policy"]["combine_scans"]
     )
 
     # Define data storage
-    state      = np.zeros((MAX_SAMPLES, N_STATE)), 
-    action     = np.zeros((MAX_SAMPLES, config["act_dim"])),
-    next_state = np.zeros((MAX_SAMPLES, N_STATE)),
-    reward     = np.zeros(MAX_SAMPLES),
+    state      = np.zeros((MAX_SAMPLES, N_STATE))
+    action     = np.zeros((MAX_SAMPLES, config["policy"]["act_dim"]))
+    next_state = np.zeros((MAX_SAMPLES, N_STATE))
+    reward     = np.zeros(MAX_SAMPLES)
     done       = np.zeros(MAX_SAMPLES)
 
     try:
@@ -80,18 +80,15 @@ if __name__=='__main__':
             with open(os.path.join(args.commands, "opponent.command"), 'r') as f:
                 opponent = f.read()
 
-            state = env.reset(
-                robot_modes=['vanilla', opponent],   # Get command from train proc
-                init_poses=init_poses, 
-                goal_poses=goal_poses
-            )
+            s = env.reset(robot_modes=['vanilla', opponent],   # Get command from train proc
+                          init_poses=init_poses, 
+                          goal_poses=goal_poses)
             d, idx = False, 0
             while not d:
                 if os.path.exists(os.path.join(args.commands, "explore.command")):
-                    a = np.random.uniform(-1.0, 1.0, config["act_dim"])
+                    a = np.random.uniform(-1.0, 1.0, config["policy"]["act_dim"])
                 else:
-                    s = torch.from_numpy(a).to(torch.float32)
-                    a, _ = policy(s, deterministic=args.test)
+                    a, _ = policy(torch.from_numpy(s).to(torch.float32), deterministic=args.test)
                     a = a.numpy()
                 ns, r, d = env.step(a)
 
@@ -113,5 +110,6 @@ if __name__=='__main__':
                                 reward=torch.from_numpy(reward[:idx]).to(torch.float32),
                                 done=torch.from_numpy(done[:idx]).to(torch.float32))
             torch.save(episode_info, args.output_file_path)
+            env.close()
     finally:
         env.close()

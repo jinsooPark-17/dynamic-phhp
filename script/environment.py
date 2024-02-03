@@ -74,11 +74,11 @@ class HallwayEpisode(GazeboController):
             rospy.sleep(0.5)
 
             # Define new episode parameters
-            mirror = np.random.choice([True, False])
+            traffic = np.random.choice(['left', 'right'])
+            mirror  = np.random.choice([True, False])
             if mirror:
                 init_poses = init_poses[::-1]
                 goal_poses = goal_poses[::-1]
-            traffic = ('left' if np.random.choice([True, False]) else 'right')
             comms_topics = [f'{robot.id}/amcl_pose' for robot in self.robots[::-1]]
 
             # teleport robot to init_pose

@@ -35,11 +35,12 @@ def load_data(sample_path):
     os.remove(sample_path)
     return data['state'], data['action'], data['next_state'], data['reward'], data['done']
 
-def random_opponent(opponent_list):
+def random_opponent(data_storage, opponent_list):
+    command_path = os.path.join(data_storage, "opponent.command")
     opponent_list = opponent_list
     def gen_command():
         idx = torch.randint(0, len(opponent_list), (1,)).item()
-        with open("opponent.command", 'w') as f:
+        with open(command_path, 'w') as f:
             f.write(opponent_list[idx])
     return gen_command
 
@@ -55,18 +56,18 @@ if __name__ == '__main__':
     N_PLAN = int(config["policy"]["sensor_horizon"]/config["policy"]["plan_interval"]*2.)
     config["policy"]["n_plan"] = N_PLAN
     config["policy"]["obs_dim"] = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2
-    choose_opponent = random_opponent(config["episode"]["opponents"])
 
     # Define data storage
-    TASK_UUID     = str(uuid.uuid4())
-    SLURM_JOBID   = os.getenv("SLURM_JOBID", default='test')
-    DATA_STORAGE  = os.path.join("results", SLURM_JOBID)
-    MODEL_STORAGE = os.path.join(DATA_STORAGE, "network")
-    MODEL         = os.path.join(DATA_STORAGE, "network", "pi.pt")
-    TEST_EPISODE  = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
-    TRAIN_EPISODE = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
-    LOG_DIR       = os.path.join(DATA_STORAGE, "tensorboard")
-    EXPLORE_CMD   = os.path.join(DATA_STORAGE, "explore.command")
+    TASK_UUID       = str(uuid.uuid4())
+    SLURM_JOBID     = os.getenv("SLURM_JOBID", default='test')
+    DATA_STORAGE    = os.path.join("results", SLURM_JOBID)
+    MODEL_STORAGE   = os.path.join(DATA_STORAGE, "network")
+    MODEL           = os.path.join(DATA_STORAGE, "network", "pi.pt")
+    TEST_EPISODE    = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
+    TRAIN_EPISODE   = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
+    LOG_DIR         = os.path.join(DATA_STORAGE, "tensorboard")
+    EXPLORE_CMD     = os.path.join(DATA_STORAGE, "explore.command")
+    choose_opponent = random_opponent(DATA_STORAGE, config["episode"]["opponents"])
 
     # Prepare training
     tensorboard = SummaryWriter(LOG_DIR)

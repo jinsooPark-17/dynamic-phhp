@@ -426,7 +426,10 @@ class Agent(Movebase):
         target_plan_idx = np.searchsorted(dist_to_robot, x) + 1
 
         # Calculate center of virtual obstacle (vo)
-        plan_x, plan_y = curr_plan[target_plan_idx]
+        try:
+            plan_x, plan_y = curr_plan[target_plan_idx]
+        except IndexError:
+            return
         dx, dy = curr_plan[target_plan_idx+1] - curr_plan[target_plan_idx-1]
         plan_prep_theta = atan2(dy, dx) - np.pi/2.
 

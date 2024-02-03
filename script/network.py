@@ -69,7 +69,7 @@ class MLPActorCritic(nn.Module):
             return a.numpy()
 
 class Actor(nn.Module):
-    def __init__(self, n_scan, n_plan, action_dim=3, combine=False):
+    def __init__(self, n_scan, n_plan, action_dim=4, combine=False):
         """
         input (state):
             scan: (n_scan*2, 640) np.vstack((raw_scans, hal_scans)), 
