@@ -75,9 +75,6 @@ if __name__ == '__main__':
     size = comm.Get_size()
     rank = comm.Get_rank()
     ROOT = 0
-    if rank == ROOT:
-        with open(os.path.join(DATA_STORAGE, "config.yml"), 'w') as f:
-            yaml.dump(config, f)
 
     LOCAL_BATCH_SIZE  = int(config["train"]["batch_size"] / size)
     LOCAL_REPLAY_SIZE = int(config["train"]["replay_size"] / size)
@@ -101,6 +98,8 @@ if __name__ == '__main__':
                 lr=config["SAC"]["lr"], 
                 alpha=config["SAC"]["alpha"])
         sac.save(MODEL_STORAGE)
+        with open(os.path.join(DATA_STORAGE, "config.yml"), 'w') as f:
+            yaml.dump(config, f)
     else:
         sac = None
     sac = comm.bcast(sac, root=0)

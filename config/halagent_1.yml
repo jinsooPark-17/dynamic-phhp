@@ -1,5 +1,5 @@
 epoch: 100
-steps_per_epoch: 1000
+steps_per_epoch: 2000
 
 SAC:
   gamma: 0.99
@@ -24,7 +24,7 @@ episode:
     - phhp
 
 train:
-  explore_steps: 4000
+  explore_steps: 3000
   update_after: 1000
   replay_size: 30000
   batch_size: 512
