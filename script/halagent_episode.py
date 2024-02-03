@@ -12,7 +12,7 @@ def generate_random_episode():
     goal_poses = np.zeros((2, 3))
 
     d = np.random.uniform(  9., 16.)
-    x = np.random.uniform(-22., -2.)
+    x = np.random.uniform(-20., -1.)
 
     init_poses[0] = [x, 0., 0.]
     if x+16 > 0:

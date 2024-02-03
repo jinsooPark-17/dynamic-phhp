@@ -430,6 +430,7 @@ class Agent(Movebase):
             plan_x, plan_y = curr_plan[target_plan_idx]
         except IndexError:
             return
+        curr_plan = np.insert(curr_plan, -1, curr_plan[-1], axis=0)
         dx, dy = curr_plan[target_plan_idx+1] - curr_plan[target_plan_idx-1]
         plan_prep_theta = atan2(dy, dx) - np.pi/2.
 

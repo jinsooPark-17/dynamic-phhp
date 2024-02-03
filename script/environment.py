@@ -2,7 +2,7 @@ import numpy as np
 from math import sin, cos
 
 import rospy
-from agent import Agent
+from agent import Agent, quaternion_to_yaw
 from std_srvs.srv import Empty
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
@@ -110,8 +110,8 @@ class HallwayEpisode(GazeboController):
             self.pause()
 
             # Check if robots actually moves
-            for robot, (x, y, _) in zip(self.robots, init_poses):
-                if (robot.pose.position.x - x)**2 + (robot.pose.position.y - y)**2 < 0.05:
+            for robot, (x, y, yaw) in zip(self.robots, init_poses):
+                if (robot.pose.position.x - x)**2 + (robot.pose.position.y - y)**2 < 0.05 and abs(quaternion_to_yaw(robot.pose.orientation) - yaw) < 0.3:
                     print(f"DEBUG: {robot.id} does not move! go back to reset process.")
                     break
             else:

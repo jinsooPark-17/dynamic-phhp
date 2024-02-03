@@ -128,6 +128,7 @@ if __name__ == '__main__':
             ep_len = replay.store(s, a, ns, r, d)
             total_steps += ep_len
             tensorboard.add_scalars("reward", {"train": r.sum()}, total_steps)
+            print(f"\t[{total_steps}] Reward: {r.sum().item()}")
 
             if total_steps > config["train"]["update_after"]:
                 for k in range(total_steps-ep_len, total_steps):
