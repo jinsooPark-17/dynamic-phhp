@@ -60,7 +60,7 @@ class HallwayEpisode(GazeboController):
 
         # Define episode control parameters
         self.compute_deply_correction = rospy.Rate(10.)
-        self.episode_duration = rospy.Rate(1./policy_hz)
+        self.episode_duration = rospy.Rate(policy_hz)
 
     def reset(self, robot_modes, init_poses: list, goal_poses: list):
         while not rospy.is_shutdown():
