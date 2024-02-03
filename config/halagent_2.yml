@@ -24,10 +24,10 @@ episode:
     - phhp
 
 train:
-  explore_steps: 2000
-  update_after: 500
+  explore_steps: 4000
+  update_after: 1000
   replay_size: 30000
-  batch_size: 32
+  batch_size: 512
 
 n_test: 1
 save_freqency: 1

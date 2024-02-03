@@ -75,6 +75,9 @@ if __name__ == '__main__':
     size = comm.Get_size()
     rank = comm.Get_rank()
     ROOT = 0
+    if rank == ROOT:
+        with open(os.path.join(DATA_STORAGE, "config.yml"), 'w') as f:
+            yaml.dump(config, f)
 
     LOCAL_BATCH_SIZE  = int(config["train"]["batch_size"] / size)
     LOCAL_REPLAY_SIZE = int(config["train"]["replay_size"] / size)
@@ -104,7 +107,7 @@ if __name__ == '__main__':
 
     # Launch simulation
     time.sleep( torch.rand(1).item()*10 )
-    launch_simulation(uuid=TASK_UUID, args='gui:=true')
+    launch_simulation(uuid=TASK_UUID, args='')
     comm.Barrier()
 
     # Main loop
@@ -152,14 +155,12 @@ if __name__ == '__main__':
             total_steps += ep_steps
 
             # Collect episode data from MPI processes
-            ep_steps_buf = (torch.empty(size) if rank==ROOT else None)
-            comm.Gather(ep_len, ep_steps_buf, root=ROOT)
-            ep_reward_buf = (torch.empty(size) if rank==ROOT else None)
-            comm.Gather(r.sum(), ep_reward_buf, root=ROOT)
+            ep_steps_buf  = comm.gather(ep_len, root=ROOT)
+            ep_reward_buf = comm.gather(r.sum(), root=ROOT)
 
             # Log episode reward to tensorboard
             if rank == ROOT:
-                for global_step, reward in zip(ep_steps_buf.cumsum(0), ep_reward_buf):
+                for global_step, reward in zip(torch.tensor(ep_steps_buf).cumsum(0), ep_reward_buf):
                     tensorboard.add_scalar("reward/train", reward, total_steps - ep_steps + global_step)
 
             if total_steps > config["train"]["update_after"]:

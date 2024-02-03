@@ -44,7 +44,7 @@ if __name__=='__main__':
     # Define constant
     N_PLAN = int(config["policy"]["sensor_horizon"]/config["policy"]["plan_interval"] * 2.)
     N_STATE = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2        # scan / plan / vw
-    MAX_SAMPLES = int(config["episode"]["timeout"] * config["policy"]["policy_hz"]) + 1
+    MAX_SAMPLES = int(config["episode"]["timeout"] * config["policy"]["policy_hz"]) + 10
 
     env = HallwayEpisode(
         num_scan_history=config["policy"]["n_scan"], 
@@ -88,8 +88,9 @@ if __name__=='__main__':
                 if os.path.exists(os.path.join(args.commands, "explore.command")):
                     a = np.random.uniform(-1.0, 1.0, config["policy"]["act_dim"])
                 else:
-                    a, _ = policy(torch.from_numpy(s).to(torch.float32), deterministic=args.test)
-                    a = a.numpy()
+                    with torch.no_grad():
+                        a, _ = policy(torch.from_numpy(s).to(torch.float32), deterministic=args.test)
+                        a = a.numpy()
                 ns, r, d = env.step(a)
 
                 # Store SAS'RD
