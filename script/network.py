@@ -83,7 +83,7 @@ class Actor(nn.Module):
         self.n_scan = n_scan
         self.act_dim = action_dim
 
-        if combine is True:
+        if self.combine is True:
             self.conv_net = nn.Sequential(
                 nn.Conv1d(in_channels=n_scan*2, out_channels=32, kernel_size=5, stride=2, padding=2),   # (32, 320)
                 nn.ReLU(),
@@ -100,7 +100,8 @@ class Actor(nn.Module):
                 nn.ReLU(),
                 nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3, stride=2, padding=1),         # (32, 160)
                 nn.ReLU(),
-                nn.Linear(5120, 128),
+                nn.Flatten(start_dim=1),
+                nn.Linear(2560, 128),
                 nn.ReLU()
             )
 
@@ -130,8 +131,8 @@ class Actor(nn.Module):
             scan = self.conv_net(scan)
             x = torch.concat([scan, plan, vw], dim=-1)
         else:
-            scan_raw = self.conv_net(scan[:self.n_scan,:])
-            scan_hal = self.conv_net(scan[self.n_scan:,:])
+            scan_raw = self.conv_net(scan[..., :self.n_scan, :])
+            scan_hal = self.conv_net(scan[..., self.n_scan:, :])
             x = torch.concat([scan_raw, scan_hal, plan, vw], dim=-1)
         x = self.fc(x)
 
@@ -159,7 +160,7 @@ class QFunction(nn.Module):
         self.n_scan = n_scan
         self.act_dim = action_dim
 
-        if combine is True:
+        if self.combine is True:
             self.conv_net = nn.Sequential(
                 nn.Conv1d(in_channels=n_scan*2, out_channels=32, kernel_size=5, stride=2, padding=2),   # (32, 320)
                 nn.ReLU(),
@@ -172,11 +173,12 @@ class QFunction(nn.Module):
         else:
             # Half size
             self.conv_net = nn.Sequential(
-                nn.Conv1d(in_channels=n_scan, out_channels=16, kernel_size=5, stride=2, padding=2),     # (32, 320)
+                nn.Conv1d(in_channels=n_scan, out_channels=16, kernel_size=5, stride=2, padding=2),     # (16, 320)
                 nn.ReLU(),
-                nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3, stride=2, padding=1),         # (32, 160)
+                nn.Conv1d(in_channels=16, out_channels=16, kernel_size=3, stride=2, padding=1),         # (16, 160)
                 nn.ReLU(),
-                nn.Linear(5120, 128),
+                nn.Flatten(start_dim=1),
+                nn.Linear(2560, 128),
                 nn.ReLU()
             )
 
@@ -188,19 +190,18 @@ class QFunction(nn.Module):
         )
 
     def forward(self, obs, act):
-        scan = obs[:self.n_scan*2].view(self.n_scan*2, 640)
-        plan = obs[self.n_scan*2:-2]
-        vw   = obs[-2:]
+        scan = obs[..., :self.n_scan*1280].view(-1, self.n_scan*2, 640)
+        plan = obs[..., self.n_scan*1280:-2]
+        vw   = obs[..., -2:]
         
         # extract features from scan
         if self.combine is True:
             scan = self.conv_net(scan)
             x = torch.concat([scan, plan, vw, act], dim=-1)
         else:
-            scan_raw = self.conv_net(scan[:self.n_scan*640])
-            scan_hal = self.conv_net(scan[self.n_scan*640:])
+            scan_raw = self.conv_net(scan[..., :self.n_scan, :])
+            scan_hal = self.conv_net(scan[..., self.n_scan:, :])
             x = torch.concat([scan_raw, scan_hal, plan, vw, act], dim=-1)
-
         q = self.fc(x)
         return torch.squeeze(q, -1)
     

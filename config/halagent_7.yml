@@ -14,14 +14,16 @@ policy:
   act_dim: 4
   # act_dim: 5
   combine_scans: True
-  policy_hz: 1.0
+  policy_hz: 2.0
 
 episode:
   timeout: 60.0
   opponents:
     - vanilla
     - baseline
+    - vanilla
     - phhp
+    - vanilla
 
 train:
   explore_steps: 2000

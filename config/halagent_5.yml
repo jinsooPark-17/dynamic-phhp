@@ -21,7 +21,9 @@ episode:
   opponents:
     - vanilla
     - baseline
+    - vanilla
     - phhp
+    - vanilla
 
 train:
   explore_steps: 2000

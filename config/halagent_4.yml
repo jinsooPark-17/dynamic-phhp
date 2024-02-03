@@ -13,8 +13,8 @@ policy:
   plan_interval: 0.5
   act_dim: 4
   # act_dim: 5
-  combine_scans: True
-  policy_hz: 1.0
+  combine_scans: False
+  policy_hz: 2.0
 
 episode:
   timeout: 60.0

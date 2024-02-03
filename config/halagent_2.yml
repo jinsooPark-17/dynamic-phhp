@@ -13,7 +13,7 @@ policy:
   plan_interval: 0.5
   act_dim: 4
   # act_dim: 5
-  combine_scans: True
+  combine_scans: False
   policy_hz: 1.0
 
 episode:
