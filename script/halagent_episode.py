@@ -10,22 +10,31 @@ from network import Actor
 def generate_random_episode():
     init_poses = np.zeros((2, 3))
     goal_poses = np.zeros((2, 3))
-
-    g = 10.0                            # Distance between init_pose to goal_pose (before: 16.0)
-    d = np.random.uniform(  6., 16.)    # Distance between robot_1 and robot_2
-    x = np.random.uniform(-17., -1.)    # robot_1's initial x location
-
-    init_poses[0] = [x, 0., 0.]
-    if x+16 > 0:
-        goal_poses[0] = [0., -(x+g), -np.pi/2.]
+    
+    center   = np.random.uniform(-10.0, 10.0)
+    d_robots = np.random.uniform(3.0, 8.0)
+    d_goal   = 10.0
+    
+    if center-d_robots < 0.:
+        init_poses[0] = [center-d_robots, 0., 0.]
     else:
-        goal_poses[0] = [x+g, 0., 0.]
-
-    if x+d > 0.:
-        init_poses[1] = [0., -(x+d), np.pi/2.]
+        init_poses[0] = [0., -(center-d_robots), -np.pi/2.]
+    
+    if center+d_robots < 0.:
+        init_poses[1] = [center + d_robots, 0., np.pi]
     else:
-        init_poses[1] = [x+d, 0, np.pi]
-    goal_poses[1] = [x+d-g, 0, np.pi]
+        init_poses[1] = [0., -(center+d_robots), np.pi/2.]
+
+    if center-d_robots+d_goal < 0.:
+        goal_poses[0] = [center-d_robots+d_goal, 0., 0.]
+    else:
+        goal_poses[0] = [0., -(center-d_robots+d_goal), -np.pi/2.]
+    
+    if center+d_robots-d_goal < 0.:
+        goal_poses[1] = [center+d_robots-d_goal, 0., np.pi]
+    else:
+        goal_poses[1] = [0., -(center+d_robots-d_goal), np.pi/2.]
+
     return init_poses, goal_poses
 
 if __name__=='__main__':

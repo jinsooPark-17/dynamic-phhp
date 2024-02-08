@@ -1,4 +1,4 @@
-epoch: 100
+epoch: 200
 steps_per_epoch: 2000
 
 SAC:
@@ -13,28 +13,26 @@ policy:
   plan_interval: 0.5
   act_dim: 4
   # act_dim: 5
-  combine_scans: False
-  policy_hz: 2.0
+  combine_scans: True
+  policy_hz: 1.0
 
 episode:
   timeout: 60.0
   opponents:
     - vanilla
     - baseline
-    - vanilla
     - phhp
-    - vanilla
 
 train:
   explore_steps: 3000
   update_after: 1000
   replay_size: 30000
-  batch_size: 512
+  batch_size: 1024
 
 reward:
-  C_PLAN_CHANGE: 5.0
+  C_PLAN_CHANGE: 20.0
   C_STOP: 1.0
-  C_SUCCESS: 30.0
+  C_SUCCESS: 60.0
 
 n_test: 1
 save_freqency: 1

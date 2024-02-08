@@ -13,7 +13,7 @@ policy:
   plan_interval: 0.5
   act_dim: 4
   # act_dim: 5
-  combine_scans: False
+  combine_scans: True
   policy_hz: 1.0
 
 episode:
@@ -30,8 +30,8 @@ train:
   batch_size: 1024
 
 reward:
-  C_PLAN_CHANGE: 5.0
-  C_STOP: 1.0
+  C_PLAN_CHANGE: 20.0
+  C_STOP: 2.0
   C_SUCCESS: 30.0
 
 n_test: 1
