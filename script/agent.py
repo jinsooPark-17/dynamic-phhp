@@ -330,6 +330,8 @@ class Agent(Movebase):
         """
         opponent_idx = np.argmin(dist_to_opponent)
         dist = np.linalg.norm(plan[1:]-plan[:-1], axis=1).cumsum()
+        if opponent_idx == dist.shape[0]:
+            opponent_idx = opponent_idx-1
         if dist[opponent_idx] < 8.0:
             dx, dy = (plan[2:] - plan[:-2]).T
             theta = np.arctan2(dy, dx) + (np.pi/2. if self.__kwargs['traffic']=='left' else -np.pi/2.)
@@ -374,10 +376,12 @@ class Agent(Movebase):
         # State #2: plan
         curr_plan = self.find_valid_plan(self.curr_plan)
         if self.prev_plan.size == 0 or self.curr_plan.size == 0:
-            hausdorff = 0.5
+            hausdorff = 0.0
+            penalty = 1.0
         else:
             prev_plan = self.find_valid_plan(self.prev_plan)
             hausdorff, _, _ = directed_hausdorff(prev_plan, curr_plan)
+            penalty = 0.0
         self.prev_plan = self.curr_plan.copy()
 
         if self.curr_plan.size == 0:
@@ -398,6 +402,7 @@ class Agent(Movebase):
             scan=np.vstack((raw_scans, hal_scans)), 
             plan=ego_plan, 
             hausdorff_dist=hausdorff, 
+            penalty=penalty,
             vw=vw
         )
         return state

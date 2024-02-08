@@ -45,7 +45,7 @@ class GazeboController(object):
         raise NotImplementedError()
 
 class HallwayEpisode(GazeboController):
-    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5, policy_hz=2):
+    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5, policy_hz=2, c_plan_change=1.0, c_stop=0.5, c_success=10.0):
         super().__init__()
         self.robots = [
             Agent(id = 'marvin', 
@@ -57,6 +57,11 @@ class HallwayEpisode(GazeboController):
                   sensor_horizon   = sensor_horizon, 
                   plan_interval    = plan_interval),
         ]
+
+        # Define reward constancts
+        self.C_PLAN_CHANGE = c_plan_change
+        self.C_STOP = c_stop
+        self.C_SUCCESS = c_success
 
         # Define episode control parameters
         self.compute_deply_correction = rospy.Rate(10.)
@@ -132,7 +137,9 @@ class HallwayEpisode(GazeboController):
 
         obs    = self.robots[0].get_state()
         done   = (not self.robots[0].is_running())
-        reward = -obs['hausdorff_dist'] + 10.*self.robots[0].is_arrived()
+        reward = -self.C_PLAN_CHANGE * obs['hausdorff_dist'] - self.C_STOP * obs['penalty']
+        if self.robots[0].is_arrived():
+            reward += self.C_SUCCESS - self.robots[0].ttd
         state  = np.concatenate((obs['scan'], obs['plan'], obs['vw']), axis=None)
         return state, reward, done
 

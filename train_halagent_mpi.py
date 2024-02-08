@@ -64,10 +64,12 @@ if __name__ == '__main__':
     DATA_STORAGE    = os.path.join("results", SLURM_JOBID)
     MODEL_STORAGE   = os.path.join(DATA_STORAGE, "network")
     MODEL           = os.path.join(DATA_STORAGE, "network", "pi.pt")
-    TEST_EPISODE    = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
     TRAIN_EPISODE   = os.path.join(os.sep, "tmp", f"{TASK_UUID}.pt")
+    TEST_EPISODE    = os.path.join(os.sep, "tmp", f"{TASK_UUID}.test.pt")
     LOG_DIR         = os.path.join(DATA_STORAGE, "tensorboard")
     EXPLORE_CMD     = os.path.join(DATA_STORAGE, "explore.command")
+    TEST_CMD        = os.path.join(DATA_STORAGE, "test.command")
+    OPPONENT_CMD    = os.path.join(DATA_STORAGE, "opponent.command")
     choose_opponent = random_opponent(DATA_STORAGE, config["episode"]["opponents"])
 
     # Initialize MPI
@@ -118,11 +120,11 @@ if __name__ == '__main__':
     comm.Barrier()
 
     ## Run infinite looping episode
-    train_ep_proc = run_episode(uuid=TASK_UUID,
-                                output_path=TRAIN_EPISODE, 
-                                model_path=MODEL,
-                                config_path=args.config,
-                                command=DATA_STORAGE)
+    ep_proc = run_episode(uuid=TASK_UUID,
+                          output_path=TRAIN_EPISODE, 
+                          model_path=MODEL,
+                          config_path=args.config,
+                          command=DATA_STORAGE)
     while not os.path.exists(TRAIN_EPISODE):
         time.sleep(0.01)
 
@@ -186,19 +188,41 @@ if __name__ == '__main__':
                         tensorboard.add_scalar("Loss/Pi", total_loss[n,0], global_step)
                         tensorboard.add_scalar("Loss/Q",  total_loss[n,1], global_step)
                 comm.Barrier()
-        """ No test recording with (Loop-episode + No MPI)
-        # For each Epoch, run test episode to show training progress
-        test_episode = run_episode(output_path=TEST_EPISODE, model_path=MODEL, test=True)
-        test_episode.wait()
-        _, _, _, r, _ = load_data(TEST_EPISODE)
-        tensorboard.add_scalars("reward", {"test": r.sum()}, total_steps)
-        """
+
+        # Now run test on each unique set of config["episode"]["opponents"]
+        for test_opponent in set(config["episode"]["opponents"]):
+            comm.Barrier()
+            if rank==ROOT:
+                with open(OPPONENT_CMD, 'w') as f:
+                    f.write(test_opponent)
+                with open(TEST_CMD, 'w') as f:
+                    pass
+                time.sleep(3.0)
+                os.remove(TEST_CMD)
+            comm.Barrier()
+
+            # Wait for the new test episode
+            while not os.path.exists(TEST_EPISODE):
+                time.sleep(0.01)
+            time.sleep(0.1)
+            comm.Barrier()
+
+            # Collect episode reward from MPI processes
+            s, a, ns, r, d = load_data(TEST_EPISODE)
+            test_reward = comm.reduce(r.sum(), op=MPI.SUM, root=ROOT)
+
+            # Log episode reward to tensorboard
+            if rank == ROOT:
+                tensorboard.add_scalar(f"test/{test_opponent}", test_reward/size, total_steps)
+
         # Save policy for every $SAVE_FREQUENCY epochs
         if rank == ROOT:
             print(f"Epoch {epoch+1} took {time.time() - start_time:.2f} seconds.", flush=True)
             if (epoch+1) % config["save_freqency"] == 0:
                 sac.save(os.path.join(MODEL_STORAGE, str(epoch+1)))
 
+    comm.Barrier()
+    ep_proc.kill()
     if rank == ROOT:
         tensorboard.close()
-    train_ep_proc.kill()
+        os.system("singularity instance stop --all")

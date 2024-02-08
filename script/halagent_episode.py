@@ -11,20 +11,21 @@ def generate_random_episode():
     init_poses = np.zeros((2, 3))
     goal_poses = np.zeros((2, 3))
 
-    d = np.random.uniform(  9., 16.)
-    x = np.random.uniform(-20., -1.)
+    g = 10.0                            # Distance between init_pose to goal_pose (before: 16.0)
+    d = np.random.uniform(  6., 16.)    # Distance between robot_1 and robot_2
+    x = np.random.uniform(-17., -1.)    # robot_1's initial x location
 
     init_poses[0] = [x, 0., 0.]
     if x+16 > 0:
-        goal_poses[0] = [0., -(x+16), -np.pi/2.]
+        goal_poses[0] = [0., -(x+g), -np.pi/2.]
     else:
-        goal_poses[0] = [x+16., 0., 0.]
+        goal_poses[0] = [x+g, 0., 0.]
 
     if x+d > 0.:
         init_poses[1] = [0., -(x+d), np.pi/2.]
     else:
         init_poses[1] = [x+d, 0, np.pi]
-    goal_poses[1] = [x+d-16, 0, np.pi]
+    goal_poses[1] = [x+d-g, 0, np.pi]
     return init_poses, goal_poses
 
 if __name__=='__main__':
@@ -36,6 +37,8 @@ if __name__=='__main__':
     parser.add_argument("--test", action='store_true',
                         help="Activate when testing a trained policy.")
     args = parser.parse_args()
+    deterministic = args.test
+    result_file = args.output_file_path
 
     # Load configurations
     with open(args.config) as f:
@@ -50,7 +53,10 @@ if __name__=='__main__':
         num_scan_history=config["policy"]["n_scan"], 
         sensor_horizon=config["policy"]["sensor_horizon"], 
         plan_interval=config["policy"]["plan_interval"], 
-        policy_hz=config["policy"]["policy_hz"]
+        policy_hz=config["policy"]["policy_hz"],
+        c_plan_change=config["reward"]["C_PLAN_CHANGE"],
+        c_stop=config["reward"]["C_STOP"],
+        c_success=config["reward"]["C_SUCCESS"]
     )
     policy = Actor(
         n_scan=config["policy"]["n_scan"],
@@ -69,8 +75,14 @@ if __name__=='__main__':
     try:
         while True:
             # wait for the training process
-            while os.path.exists(args.output_file_path):
+            while os.path.exists(result_file):
+                if os.path.exists(os.path.join(args.commands, "test.command")):
+                    deterministic = True
+                    result_file = args.output_file_path.replace('.', '.test.')
+                    break
                 time.sleep(0.1)
+            else:
+                deterministic = args.test
             
             # Load new model
             policy.load_state_dict(torch.load(args.network_dir))
@@ -89,7 +101,7 @@ if __name__=='__main__':
                     a = np.random.uniform(-1.0, 1.0, config["policy"]["act_dim"])
                 else:
                     with torch.no_grad():
-                        a, _ = policy(torch.from_numpy(s).to(torch.float32), deterministic=args.test)
+                        a, _ = policy(torch.from_numpy(s).to(torch.float32), deterministic=deterministic)
                         a = a.numpy()
                 ns, r, d = env.step(a)
 
@@ -110,7 +122,8 @@ if __name__=='__main__':
                                 next_state=torch.from_numpy(next_state[:idx]).to(torch.float32),
                                 reward=torch.from_numpy(reward[:idx]).to(torch.float32),
                                 done=torch.from_numpy(done[:idx]).to(torch.float32))
-            torch.save(episode_info, args.output_file_path)
+            torch.save(episode_info, result_file)
+            result_file = args.output_file_path
             env.close()
     finally:
         env.close()

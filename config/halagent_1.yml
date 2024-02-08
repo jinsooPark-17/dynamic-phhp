@@ -29,5 +29,10 @@ train:
   replay_size: 30000
   batch_size: 512
 
+reward:
+  C_PLAN_CHANGE: 5.0
+  C_STOP: 1.0
+  C_SUCCESS: 30.0
+
 n_test: 1
 save_freqency: 1
