@@ -1,4 +1,4 @@
-epoch: 100
+epoch: 200
 steps_per_epoch: 2000
 
 SAC:
@@ -27,7 +27,7 @@ train:
   explore_steps: 3000
   update_after: 1000
   replay_size: 30000
-  batch_size: 512
+  batch_size: 1024
 
 reward:
   C_PLAN_CHANGE: 5.0
