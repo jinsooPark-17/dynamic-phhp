@@ -55,13 +55,14 @@ if __name__=='__main__':
 
     # Define constant
     N_PLAN = int(config["policy"]["sensor_horizon"]/config["policy"]["plan_interval"] * 2.)
-    N_STATE = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2        # scan / plan / vw
+    N_STATE = 2*config["policy"]["n_scan"]*640 + N_PLAN + config["policy"]["n_vo_history"]*4 +2     # scan / plan / vo_hist / vw
     MAX_SAMPLES = int(config["episode"]["timeout"] * config["policy"]["policy_hz"]) + 10
 
     env = HallwayEpisode(
         num_scan_history=config["policy"]["n_scan"], 
         sensor_horizon=config["policy"]["sensor_horizon"], 
         plan_interval=config["policy"]["plan_interval"], 
+        n_vo_history=config["policy"]["n_vo_history"],
         policy_hz=config["policy"]["policy_hz"],
         c_plan_change=config["reward"]["C_PLAN_CHANGE"],
         c_stop=config["reward"]["C_STOP"],
@@ -70,6 +71,7 @@ if __name__=='__main__':
     policy = Actor(
         n_scan=config["policy"]["n_scan"],
         n_plan=N_PLAN,
+        n_vo=config["n_vo_history"] * 4,
         action_dim=config["policy"]["act_dim"],
         combine=config["policy"]["combine_scans"]
     )

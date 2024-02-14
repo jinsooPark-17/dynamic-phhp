@@ -9,6 +9,7 @@ SAC:
 
 policy:
   n_scan: 1
+  n_vo_history: 10
   sensor_horizon: 8.0
   plan_interval: 0.5
   act_dim: 4

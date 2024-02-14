@@ -45,17 +45,19 @@ class GazeboController(object):
         raise NotImplementedError()
 
 class HallwayEpisode(GazeboController):
-    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5, policy_hz=2, c_plan_change=1.0, c_stop=0.5, c_success=10.0):
+    def __init__(self, num_scan_history=1, sensor_horizon=8.0, plan_interval=0.5, n_vo_history=10, policy_hz=2, c_plan_change=1.0, c_stop=0.5, c_success=10.0):
         super().__init__()
         self.robots = [
             Agent(id = 'marvin', 
                   num_scan_history = num_scan_history, 
                   sensor_horizon   = sensor_horizon, 
-                  plan_interval    = plan_interval),
+                  plan_interval    = plan_interval,
+                  n_vo_history     = n_vo_history),
             Agent(id = 'rob', 
                   num_scan_history = num_scan_history, 
                   sensor_horizon   = sensor_horizon, 
-                  plan_interval    = plan_interval),
+                  plan_interval    = plan_interval,
+                  n_vo_history     = n_vo_history),
         ]
 
         # Define reward constancts

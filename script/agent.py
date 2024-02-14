@@ -134,6 +134,7 @@ class Agent(Movebase):
             num_scan_history, 
             sensor_horizon, 
             plan_interval, 
+            n_vo_history,
             map_frame='level_mux_map',
             radius=0.35):
         super(Agent, self).__init__(id, map_frame)
@@ -162,7 +163,7 @@ class Agent(Movebase):
         self.sensor_horizon = sensor_horizon
         self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)[1:]
 
-        self.vo_history = np.zeros((10,4))  # (x, y, r, t_vanish)
+        self.vo_history = np.zeros((n_vo_history,4))  # (x, y, r, t_vanish)
         self.vo_idx     = 0
 
         # Define services

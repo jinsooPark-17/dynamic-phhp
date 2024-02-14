@@ -93,7 +93,7 @@ if __name__ == '__main__':
     if rank == ROOT:
         actor_critic = ActorCritic(n_scan=config["policy"]["n_scan"],
                                 n_plan=N_PLAN,
-                                n_vo_hist = 40,
+                                n_vo = config["policy"]["n_vo_history"] * 4,
                                 action_dim=config["policy"]["act_dim"],
                                 combine=config["policy"]["combine_scans"])
         sac = SAC(actor_critic=actor_critic,
