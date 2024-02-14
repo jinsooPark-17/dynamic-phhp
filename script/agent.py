@@ -162,6 +162,9 @@ class Agent(Movebase):
         self.sensor_horizon = sensor_horizon
         self.plan_interval = np.arange(0.0, self.sensor_horizon+plan_interval, plan_interval)[1:]
 
+        self.vo_history = np.zeros((10,4))  # (x, y, r, t_vanish)
+        self.vo_idx     = 0
+
         # Define services
         self.__make_plan_srv = rospy.ServiceProxy(os.path.join(self.id, "move_base", "NavfnROS", "make_plan"), GetPlan)
         self.__clear_hallucination_srv = rospy.ServiceProxy(os.path.join(self.id, "clear_virtual_circles"), Empty)
@@ -394,16 +397,29 @@ class Agent(Movebase):
             ego_plan = np.vstack((np.hypot(plan_y, plan_x), np.arctan2(plan_y, plan_x) - yaw )).T
             ego_plan = ego_plan / [self.sensor_horizon, np.pi]
 
-        # State #3: cmd_vel
+        # State #3: vo_history
+        ego_vo_hist = np.zeros_like(self.vo_history)
+        ## convert global_coordinations to ego centric view
+        valid_vos = np.roll(self.vo_history, -self.vo_idx)
+        vo_x = valid_vos[:,0] - self.pose.position.x
+        vo_y = valid_vos[:,1] - self.pose.position.y
+        valid_vos[:,0] = np.hypot(vo_x, vo_y) / self.sensor_horizon
+        valid_vos[:,1] = (np.arctan2(vo_y, vo_x) - quaternion_to_yaw(self.pose.orientation)) / np.pi
+        valid_vos[:,3] = (valid_vos[:,-1] - rospy.Time.now().to_sec()) / 10.0
+        valid_idx = valid_vos[:,-1] > 0.
+        ego_vo_hist[valid_idx] = valid_vos[valid_idx]
+
+        # State #4: cmd_vel
         vw = self.cmd_vel.copy()
         self.cmd_vel[:] = 0.
 
         state = dict(
             scan=np.vstack((raw_scans, hal_scans)), 
             plan=ego_plan, 
+            vo_hist = ego_vo_hist,
+            vw=vw,
             hausdorff_dist=hausdorff, 
             penalty=penalty,
-            vw=vw
         )
         return state
     
@@ -423,7 +439,7 @@ class Agent(Movebase):
         r = 0.2*r + 0.4                     # 0.2 ~ 0.6 meter
         x = (x+1.)/2. * self.sensor_horizon # 0. ~ sensor_horizon (default: 0 ~ 8m)
         y = 5 * r * y                       # -5r ~ 5r (default: -1.0 ~ 1.0 m)
-        t = t * 5. + 10.                    # 5.0 ~ 15.0 seconds
+        t = t * 4. + 6.                     # 2.0 ~ 10.0 seconds # 5.0 ~ 15.0 seconds
 
         # Find target plan from [x] value
         curr_plan = self.find_valid_plan(self.curr_plan)
@@ -453,6 +469,10 @@ class Agent(Movebase):
         msg.header.stamp = rospy.Time.now() + rospy.Duration(t)
         msg.polygon.points = [Point32(vo_x, vo_y, r)]
         self.__pub_hallucination.publish(msg)
+
+        # Store current VO in vo_history
+        self.vo_history[self.vo_idx] = [vo_x, vo_y, r, msg.header.stamp.to_sec()]
+        self.vo_idx = (self.vo_idx + 1) % self.vo_history.shape[0]
 
 if __name__ == '__main__':
     import time

@@ -118,11 +118,15 @@ class HallwayEpisode(GazeboController):
             for robot, (x, y, yaw) in zip(self.robots, init_poses):
                 if (robot.pose.position.x - x)**2 + (robot.pose.position.y - y)**2 < 0.05 and abs(quaternion_to_yaw(robot.pose.orientation) - yaw) < 0.3:
                     print(f"DEBUG: {robot.id} does not move! go back to reset process.")
+                    # If reset process is activated, leave log about init and goal pose!
+                    for init_pose, goal_pose in zip(init_poses, goal_poses):
+                        print(f"\t{init_pose} -> {goal_pose}")
                     break
             else:
                 obs   = self.robots[0].get_state()
-                state = np.concatenate((obs['scan'], obs['plan'], obs['vw']), axis=None)
+                state = np.concatenate((obs['scan'], obs['plan'], obs['vo_hist'], obs['vw']), axis=None)
                 return state
+
 
     def step(self, action):
         self.unpause()
@@ -139,8 +143,10 @@ class HallwayEpisode(GazeboController):
         done   = (not self.robots[0].is_running())
         reward = -self.C_PLAN_CHANGE * obs['hausdorff_dist'] - self.C_STOP * obs['penalty']
         if self.robots[0].is_arrived():
+            if type(self.robots[0].ttd) is rospy.Time:
+                self.robots[0].ttd = (rospy.Time.now() - self.robots[0].ttd).to_sec()
             reward += self.C_SUCCESS - self.robots[0].ttd
-        state  = np.concatenate((obs['scan'], obs['plan'], obs['vw']), axis=None)
+        state  = np.concatenate((obs['scan'], obs['plan'], obs['vo_hist'], obs['vw']), axis=None)
         return state, reward, done
 
     def close(self):

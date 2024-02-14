@@ -56,7 +56,7 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
     N_PLAN = int(config["policy"]["sensor_horizon"]/config["policy"]["plan_interval"]*2.)
     config["policy"]["n_plan"] = N_PLAN
-    config["policy"]["obs_dim"] = 2*config["policy"]["n_scan"]*640 + N_PLAN + 2
+    config["policy"]["obs_dim"] = 2*config["policy"]["n_scan"]*640 + N_PLAN + 40 + 2    # 40 := vo_hist, 10*4
 
     # Define data storage
     TASK_UUID       = str(uuid.uuid4())
@@ -78,6 +78,7 @@ if __name__ == '__main__':
     rank = comm.Get_rank()
     ROOT = 0
 
+    LOCAL_RANK = int(os.getenv('MPI_LOCALRANKID') or os.getenv('MV2_COMM_WORLD_LOCAL_RANK'))
     LOCAL_BATCH_SIZE  = int(config["train"]["batch_size"] / size)
     LOCAL_REPLAY_SIZE = int(config["train"]["replay_size"] / size)
 
@@ -92,6 +93,7 @@ if __name__ == '__main__':
     if rank == ROOT:
         actor_critic = ActorCritic(n_scan=config["policy"]["n_scan"],
                                 n_plan=N_PLAN,
+                                n_vo_hist = 40,
                                 action_dim=config["policy"]["act_dim"],
                                 combine=config["policy"]["combine_scans"])
         sac = SAC(actor_critic=actor_critic,
@@ -107,7 +109,7 @@ if __name__ == '__main__':
     sac = comm.bcast(sac, root=0)
 
     # Launch simulation
-    time.sleep( torch.rand(1).item()*10 )
+    time.sleep( LOCAL_RANK*5 )
     launch_simulation(uuid=TASK_UUID, args='')
     comm.Barrier()
 
@@ -189,9 +191,14 @@ if __name__ == '__main__':
                         tensorboard.add_scalar("Loss/Q",  total_loss[n,1], global_step)
                 comm.Barrier()
 
+        # Wait for all train episodes to finished before move on to the test episode
+        while not os.path.exists(TRAIN_EPISODE):
+            time.sleep(0.01)
+        time.sleep(0.1)  # Wait for file creation routine
+        comm.Barrier()
+
         # Now run test on each unique set of config["episode"]["opponents"]
         for test_opponent in set(config["episode"]["opponents"]):
-            comm.Barrier()
             if rank==ROOT:
                 with open(OPPONENT_CMD, 'w') as f:
                     f.write(test_opponent)
@@ -214,6 +221,7 @@ if __name__ == '__main__':
             # Log episode reward to tensorboard
             if rank == ROOT:
                 tensorboard.add_scalar(f"test/{test_opponent}", test_reward/size, total_steps)
+            comm.Barrier()
 
         # Save policy for every $SAVE_FREQUENCY epochs
         if rank == ROOT:

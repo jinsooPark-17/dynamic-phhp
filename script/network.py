@@ -69,7 +69,7 @@ class MLPActorCritic(nn.Module):
             return a.numpy()
 
 class Actor(nn.Module):
-    def __init__(self, n_scan, n_plan, action_dim=4, combine=False):
+    def __init__(self, n_scan, n_plan, n_vo, action_dim=4, combine=False):
         """
         input (state):
             scan: (n_scan*2, 640) np.vstack((raw_scans, hal_scans)), 
@@ -81,6 +81,7 @@ class Actor(nn.Module):
 
         self.combine = combine
         self.n_scan = n_scan
+        self.n_vo = n_vo
         self.act_dim = action_dim
 
         if self.combine is True:
@@ -106,7 +107,7 @@ class Actor(nn.Module):
             )
 
         self.fc = nn.Sequential(
-            nn.Linear(256+n_plan+2, 128),
+            nn.Linear(256+n_plan+n_vo+2, 128),
             nn.ReLU(),
         )
         self.mu_layer = nn.Linear(128, action_dim)
@@ -153,11 +154,12 @@ class Actor(nn.Module):
         return action, logp
     
 class QFunction(nn.Module):
-    def __init__(self, n_scan, n_plan, action_dim=3, combine=False):
+    def __init__(self, n_scan, n_plan, n_vo, action_dim=3, combine=False):
         super().__init__()
 
         self.combine = combine
         self.n_scan = n_scan
+        self.n_vo = n_vo
         self.act_dim = action_dim
 
         if self.combine is True:
@@ -183,7 +185,7 @@ class QFunction(nn.Module):
             )
 
         self.fc = nn.Sequential(
-            nn.Linear(256+n_plan+2+action_dim, 128),
+            nn.Linear(256+n_plan+n_vo+2+action_dim, 128),
             nn.ReLU(),
             nn.Linear(128, 1),
             nn.Identity()
@@ -206,12 +208,12 @@ class QFunction(nn.Module):
         return torch.squeeze(q, -1)
     
 class ActorCritic(nn.Module):
-    def __init__(self, n_scan, n_plan, action_dim, combine=True):
+    def __init__(self, n_scan, n_plan, n_vo, action_dim, combine=True):
         super().__init__()
 
-        self.pi = Actor(n_scan, n_plan, action_dim, combine)
-        self.q1 = QFunction(n_scan, n_plan, action_dim, combine)
-        self.q2 = QFunction(n_scan, n_plan, action_dim, combine)
+        self.pi = Actor(n_scan, n_plan, n_vo, action_dim, combine)
+        self.q1 = QFunction(n_scan, n_plan, n_vo, action_dim, combine)
+        self.q2 = QFunction(n_scan, n_plan, n_vo, action_dim, combine)
 
     def act(self, obs, deterministic=False):
         with torch.no_grad():

@@ -8,20 +8,20 @@ SAC:
   alpha: 0.2
 
 policy:
-  n_scan: 1
+  n_scan: 5
   sensor_horizon: 8.0
   plan_interval: 0.5
   act_dim: 4
   # act_dim: 5
   combine_scans: True
-  policy_hz: 1.0
+  policy_hz: 2.0
 
 episode:
   timeout: 60.0
   opponents:
     - vanilla
-    - baseline
-    - phhp
+    # - baseline
+    # - phhp
 
 train:
   explore_steps: 3000
@@ -31,8 +31,8 @@ train:
 
 reward:
   C_PLAN_CHANGE: 5.0
-  C_STOP: 1.0
-  C_SUCCESS: 60.0
+  C_STOP: 2.0
+  C_SUCCESS: 100.0
 
 n_test: 1
 save_freqency: 1
